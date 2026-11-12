@@ -7,6 +7,10 @@ on:
         type: choice
         options: [build, prepare]
         default: build
+      release_tag:
+        description: publish the verified build as this new release tag (build mode only; empty skips publication)
+        type: string
+        default: ''
 permissions:
   contents: read
 jobs:
@@ -123,3 +127,43 @@ jobs:
             node .work/musl/runtime/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js --version
             node tools/verify.mjs /w/.work/musl/runtime
           '
+
+  release:
+    if: inputs.mode == 'build' && inputs.release_tag != ''
+    needs: [build, musl]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.release_tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Refuse invalid or existing tags
+        run: |
+          printf '%s\n' "$TAG" | grep -Eq '^full-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$'
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo "release $TAG exists" >&2; exit 1; fi
+      - name: Install musl loader for pinned Python
+        if: runner.os == 'Linux'
+        run: |
+          loader=ld-musl-$(uname -m).so.1
+          docker run --rm -v "$RUNNER_TEMP:/out" alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f cp "/lib/$loader" /out/
+          sudo install -m 755 "$RUNNER_TEMP/$loader" "/lib/$loader"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: dist-*
+          path: .work/dl
+      - name: Merge provenance and checksums
+        run: |
+          python=$(sh tools/toolchain.sh linux-x64 | sed -n 2p)
+          mkdir -p .work/release
+          cp .work/dl/dist-*/*-full.tar.gz .work/dl/dist-*/*-full.tar.gz.manifest.json .work/release/
+          "$python" -I tools/release.py .work/release .work/dl/dist-*/provenance.json
+          cat .work/release/SHA256SUMS
+      - name: Publish release
+        run: |
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" \
+            --notes "Full Pi runtime built and verified at $GITHUB_SHA by run $GITHUB_RUN_ID." \
+            .work/release/*
