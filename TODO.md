@@ -3,14 +3,14 @@ Next: 6
 
 # TODO
 
-Sizes below were measured on the darwin-arm64 `full` archive from release `full-1.5.0-1` (35.5 MB compressed, about 155 MB of logical file bytes, 208 MB on disk). Before each removal, remeasure with `make sizes`, state the minimum saving and the behaviors that must remain, and rerun `make repro verify` on every target, the musl job, and the `usr` extracted-runtime probes (`test_sdk_protocol.mjs`, `test_intercom_protocol.mjs`, `verify-extensions.mjs`). Names alone (TUI, image, provider) do not prove a module is unreachable. Headless does not mean text-only.
+Sizes below were measured on the aarch64-apple-darwin `full` archive from release `full-1.5.0-1` (35.5 MB compressed, about 155 MB of logical file bytes, 208 MB on disk). Before each removal, remeasure with `make sizes`, state the minimum saving and the behaviors that must remain, and rerun `make repro verify` on every target, the musl job, and the `usr` extracted-runtime probes (`test_sdk_protocol.mjs`, `test_intercom_protocol.mjs`, `verify-extensions.mjs`). Names alone (TUI, image, provider) do not prove a module is unreachable. Headless does not mean text-only.
 
 ### PIB-1 · P3 · No headless-usr profile can be built or selected
 
 - **Area:** Build
-- **Where:** `tools/build.sh:12`, `Makefile`, `tools/release.py`, `.github/workflows/build.yml`, `usr/tools/sync/pi_release.py:57`, `usr/tools/sync/installer.py` (`install_pi`)
+- **Where:** `tools/build.sh:12`, `Makefile`, `tools/release.py`, `.github/workflows/release.yml`, `usr/tools/sync/pi_release.py:57`, `usr/tools/sync/installer.py` (`install_pi`)
 - **Problem:** `tools/build.sh` rejects every profile except `full`, and the workflow and release merge assume one profile per release. The `usr` pin schema already accepts `headless-usr`, but the installer has no explicit profile selection, so a reduced closure has no delivery path. Every reduction below depends on this.
-- **Recommendation:** Let `build.sh` take a `headless-usr` profile that starts as a copy of `full` and applies an explicit removal list, released under its own tag (`headless-usr-<pi version>-<n>`). In `usr`, add an opt-in profile setting that selects a second pin file. Keep `full` as the default and keep bare interactive `pi`. Install exactly one closure.
+- **Recommendation:** Let `build.sh` take a `headless-usr` profile that starts as a copy of `full` and applies an explicit removal list, released as its own product (`pi-headless-usr-<pi version>-<target>`). In `usr`, add an opt-in profile setting that selects a second pin file. Keep `full` as the default and keep bare interactive `pi`. Install exactly one closure.
 - **Fix with:** `architect`
 - **Effort:** M
 

@@ -1,6 +1,6 @@
-import gzip
 import hashlib
 import json
+import lzma
 import posixpath
 import tarfile
 from pathlib import Path
@@ -14,23 +14,31 @@ def digest(path):
     return value.hexdigest()
 
 
-def archive(source, output, target, profile, builder_revision):
+def manifest_path(archive_path):
+    path = Path(archive_path)
+    return path.with_name(path.name.removesuffix(".tar.xz") + ".manifest.json")
+
+
+def archive(source, output, product, version, target, profile, source_revision):
     root = Path(source)
     output = Path(output)
     modules = root / "node_modules"
-    with output.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0, compresslevel=9) as compressed:
-        with tarfile.open(fileobj=compressed, mode="w") as bundle:
-            for path in sorted(modules.rglob("*"), key=lambda item: item.relative_to(modules).as_posix()):
-                relative = path.relative_to(modules).as_posix()
-                info = bundle.gettarinfo(str(path), arcname="node_modules/" + relative)
-                info.uid = info.gid = 0
-                info.uname = info.gname = ""
-                info.mtime = 0
-                if info.isfile():
-                    with path.open("rb") as stream:
-                        bundle.addfile(info, stream)
-                else:
-                    bundle.addfile(info)
+    with (
+        output.open("wb") as raw,
+        lzma.LZMAFile(raw, "wb", format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=9) as compressed,
+        tarfile.open(fileobj=compressed, mode="w") as bundle,
+    ):
+        for path in sorted(modules.rglob("*"), key=lambda item: item.relative_to(modules).as_posix()):
+            relative = path.relative_to(modules).as_posix()
+            info = bundle.gettarinfo(str(path), arcname="node_modules/" + relative)
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            info.mtime = 0
+            if info.isfile():
+                with path.open("rb") as stream:
+                    bundle.addfile(info, stream)
+            else:
+                bundle.addfile(info)
     inventory = {}
     for package in sorted((root / "node_modules").iterdir()):
         if package.name.startswith("@"):
@@ -39,27 +47,30 @@ def archive(source, output, target, profile, builder_revision):
         else:
             inventory[package.name] = sum(p.stat().st_size for p in package.rglob("*") if p.is_file() and not p.is_symlink())
     manifest = {
-        "schema": 1,
+        "schema_version": 1,
+        "product": product,
+        "version": version,
         "target": target,
         "profile": profile,
-        "builder_revision": builder_revision,
+        "source_revision": source_revision,
+        "sources_lock_sha256": digest(Path("sources.lock.json")),
         "archive": output.name,
         "sha256": digest(output),
         "bytes": output.stat().st_size,
         "source_manifest_sha256": digest(Path("sources/upstreams.json")),
         "packages": inventory,
     }
-    Path(str(output) + ".manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+    manifest_path(output).write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
     return manifest
 
 
 def verify(archive_path, manifest_path, target, profile):
     manifest = json.loads(Path(manifest_path).read_text())
-    if manifest["schema"] != 1 or manifest["target"] != target or manifest["profile"] != profile:
+    if manifest["schema_version"] != 1 or manifest["target"] != target or manifest["profile"] != profile:
         raise ValueError("artifact identity mismatch")
     if manifest["bytes"] != Path(archive_path).stat().st_size or manifest["sha256"] != digest(Path(archive_path)):
         raise ValueError("archive digest or size mismatch")
-    with tarfile.open(archive_path, "r:gz") as bundle:
+    with tarfile.open(archive_path, "r:xz") as bundle:
         validate_members(bundle.getmembers())
     return manifest
 
@@ -87,9 +98,8 @@ def validate_members(members):
             if parent in links:
                 raise ValueError("archive member traverses symlink parent: " + name)
             parent = posixpath.dirname(parent)
-    for name in links:
+    for name, target in links.items():
         seen = {name}
-        target = links[name]
         while target in links:
             if target in seen:
                 raise ValueError("cyclic archive link: " + name)
@@ -100,7 +110,7 @@ def validate_members(members):
 
 
 def unpack(source, destination):
-    with tarfile.open(source, "r:gz") as bundle:
+    with tarfile.open(source, "r:xz") as bundle:
         members = bundle.getmembers()
         validate_members(members)
         bundle.extractall(destination, members=members)
@@ -113,9 +123,11 @@ if __name__ == "__main__":
     pack = commands.add_parser("archive")
     pack.add_argument("source")
     pack.add_argument("output")
+    pack.add_argument("product")
+    pack.add_argument("version")
     pack.add_argument("target")
     pack.add_argument("profile")
-    pack.add_argument("builder_revision")
+    pack.add_argument("source_revision")
     unpacker = commands.add_parser("unpack")
     unpacker.add_argument("archive")
     unpacker.add_argument("destination")
@@ -126,7 +138,7 @@ if __name__ == "__main__":
     check.add_argument("profile")
     args = parser.parse_args()
     if args.command == "archive":
-        print(json.dumps(archive(args.source, args.output, args.target, args.profile, args.builder_revision), sort_keys=True))
+        print(json.dumps(archive(args.source, args.output, args.product, args.version, args.target, args.profile, args.source_revision), sort_keys=True))
     elif args.command == "unpack":
         unpack(args.archive, args.destination)
     else:

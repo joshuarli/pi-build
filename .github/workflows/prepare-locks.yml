@@ -1,0 +1,52 @@
+name: prepare locks
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.head_ref || github.run_id }}"
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  prepare:
+    name: Prepare (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-26.04 }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-26.04-arm }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install musl loader for pinned Python
+        if: runner.os == 'Linux'
+        run: |
+          loader=ld-musl-$(uname -m).so.1
+          docker run --rm -v "$RUNNER_TEMP:/out" alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 cp "/lib/$loader" /out/
+          sudo install -m 755 "$RUNNER_TEMP/$loader" "/lib/$loader"
+      - name: Install pinned toolchain
+        run: |
+          out=$(sh tools/toolchain.sh "${{ matrix.target }}")
+          printf '%s\n' "$out" | sed -n 1p >> "$GITHUB_PATH"
+          printf 'PYTHON=%s\n' "$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
+      - name: Prepare locks
+        run: make prepare TARGET="${{ matrix.target }}" PROFILE=full PYTHON="$PYTHON"
+      - name: Require shared core lock unchanged
+        run: git diff --exit-code -- locks/core-build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: locks-${{ matrix.target }}
+          path: locks/${{ matrix.target }}
+          if-no-files-found: error

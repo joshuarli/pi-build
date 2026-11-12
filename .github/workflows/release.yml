@@ -1,0 +1,252 @@
+name: release
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.head_ref || github.run_id }}"
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  preflight:
+    name: Validate release ref
+    runs-on: ubuntu-26.04-arm
+    permissions:
+      contents: read
+    outputs:
+      default_branch: ${{ steps.ref.outputs.default_branch }}
+    steps:
+      - name: Require the default branch
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          default_branch=$(gh api "repos/$REPOSITORY" --jq '.default_branch')
+          if [[ "$EVENT_NAME" != workflow_dispatch || "$REF" != "refs/heads/$default_branch" ]]; then
+            echo "Release dispatch rejected: expected workflow_dispatch on refs/heads/$default_branch, got $EVENT_NAME on $REF" >&2
+            exit 1
+          fi
+          echo "default_branch=$default_branch" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, runner: macos-latest }
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-26.04 }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-26.04-arm }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Install musl loader for pinned Python
+        if: runner.os == 'Linux'
+        run: |
+          loader=ld-musl-$(uname -m).so.1
+          docker run --rm -v "$RUNNER_TEMP:/out" alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 cp "/lib/$loader" /out/
+          sudo install -m 755 "$RUNNER_TEMP/$loader" "/lib/$loader"
+      - name: Install pinned toolchain
+        run: |
+          out=$(sh tools/toolchain.sh "${{ matrix.target }}")
+          printf '%s\n' "$out" | sed -n 1p >> "$GITHUB_PATH"
+          printf 'PYTHON=%s\n' "$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
+      - name: Build twice and verify
+        run: make repro verify TARGET="${{ matrix.target }}" PROFILE=full PYTHON="$PYTHON"
+      - name: Require committed inputs unchanged
+        run: git diff --exit-code -- locks sources patches
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            dist/full/pi-full-*-${{ matrix.target }}.tar.xz
+            dist/full/pi-full-*-${{ matrix.target }}.manifest.json
+            dist/full/provenance.json
+          if-no-files-found: error
+
+  musl:
+    name: Musl check (${{ matrix.target }})
+    needs: [preflight, build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-26.04 }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-26.04-arm }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/full
+      - name: Install musl loader for pinned Python
+        if: runner.os == 'Linux'
+        run: |
+          loader=ld-musl-$(uname -m).so.1
+          docker run --rm -v "$RUNNER_TEMP:/out" alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 cp "/lib/$loader" /out/
+          sudo install -m 755 "$RUNNER_TEMP/$loader" "/lib/$loader"
+      - name: Install pinned toolchain
+        run: |
+          out=$(sh tools/toolchain.sh "${{ matrix.target }}")
+          printf '%s\n' "$out" | sed -n 1p >> "$GITHUB_PATH"
+          printf 'PYTHON=%s\n' "$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
+      - name: Extract verified archive
+        run: |
+          artifact=$(ls dist/full/pi-full-*-${{ matrix.target }}.tar.xz)
+          manifest=${artifact%.tar.xz}.manifest.json
+          "$PYTHON" -I tools/archive.py verify "$artifact" "$manifest" "${{ matrix.target }}" full >/dev/null
+          mkdir -p .work/musl/runtime
+          "$PYTHON" -I tools/archive.py unpack "$artifact" .work/musl/runtime
+      - name: Install musl Node
+        run: |
+          bin=$(sh tools/toolchain.sh "${{ matrix.target }}" musl)
+          printf 'NODE_BIN=/w%s\n' "${bin#"$PWD"}" >> "$GITHUB_ENV"
+      - name: Run CLI and SDK loader under musl
+        run: |
+          docker run --rm -e NODE_BIN -v "$PWD:/w" -w /w alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 sh -euc '
+            apk add --no-cache libstdc++ >/dev/null
+            export PATH="$NODE_BIN:$PATH" TMPDIR=/w/.work/tmp
+            mkdir -p "$TMPDIR"
+            ldd "$NODE_BIN/node" | grep -q musl
+            node .work/musl/runtime/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js --version
+            node tools/verify.mjs /w/.work/musl/runtime
+          '
+
+  release:
+    name: Create pre-release
+    needs: [preflight, build, musl]
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Recheck release ref and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ needs.preflight.outputs.default_branch }}
+          RELEASE_TAG: release-${{ github.sha }}
+        run: |
+          default_branch=$(gh api "repos/$REPOSITORY" --jq '.default_branch')
+          if [[ "$EVENT_NAME" != workflow_dispatch || "$REF" != "refs/heads/$default_branch" || "$DEFAULT_BRANCH" != "$default_branch" ]]; then
+            echo "Release publication rejected: expected workflow_dispatch on refs/heads/$default_branch, got $EVENT_NAME on $REF" >&2
+            exit 1
+          fi
+          if response=$(gh api "repos/$REPOSITORY/git/ref/tags/$RELEASE_TAG" 2>&1); then
+            echo "Release publication rejected: tag $RELEASE_TAG already exists; inspect it before proceeding" >&2
+            exit 1
+          else
+            if [[ "$response" != *"HTTP 404"* ]]; then
+              printf 'Could not verify that tag %s is absent: %s\n' "$RELEASE_TAG" "$response" >&2
+              exit 1
+            fi
+          fi
+      - name: Install musl loader for pinned Python
+        if: runner.os == 'Linux'
+        run: |
+          loader=ld-musl-$(uname -m).so.1
+          docker run --rm -v "$RUNNER_TEMP:/out" alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 cp "/lib/$loader" /out/
+          sudo install -m 755 "$RUNNER_TEMP/$loader" "/lib/$loader"
+      - name: Install pinned toolchain
+        run: |
+          out=$(sh tools/toolchain.sh aarch64-unknown-linux-musl)
+          printf 'PYTHON=%s\n' "$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*
+          path: .work/dl
+      - name: Merge provenance and checksums
+        run: |
+          mkdir -p .work/release
+          cp .work/dl/dist-*/pi-full-*.tar.xz .work/dl/dist-*/pi-full-*.manifest.json .work/release/
+          "$PYTHON" -I tools/release.py .work/release .work/dl/dist-*/provenance.json
+          (cd .work/release && sha256sum -c SHA256SUMS)
+      - name: Create release tag at triggering SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: release-${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ needs.preflight.outputs.default_branch }}
+        run: |
+          default_branch=$(gh api "repos/$REPOSITORY" --jq '.default_branch')
+          if [[ "$EVENT_NAME" != workflow_dispatch || "$REF" != "refs/heads/$default_branch" || "$DEFAULT_BRANCH" != "$default_branch" ]]; then
+            echo "Release publication rejected: expected workflow_dispatch on refs/heads/$default_branch, got $EVENT_NAME on $REF" >&2
+            exit 1
+          fi
+          if response=$(gh api "repos/$REPOSITORY/git/ref/tags/$RELEASE_TAG" 2>&1); then
+            echo "Release publication rejected: tag $RELEASE_TAG already exists; inspect it before proceeding" >&2
+            exit 1
+          elif [[ "$response" != *"HTTP 404"* ]]; then
+            printf 'Could not verify that tag %s is absent: %s\n' "$RELEASE_TAG" "$response" >&2
+            exit 1
+          fi
+          if response=$(gh api "repos/$REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA" 2>&1); then
+            echo "Created $RELEASE_TAG at $GITHUB_SHA"
+          else
+            printf 'Could not create release tag %s at %s: %s\n' "$RELEASE_TAG" "$GITHUB_SHA" "$response" >&2
+            exit 1
+          fi
+
+      - name: Write release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="$RUNNER_TEMP/release-notes.md"
+          previous=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1 \
+            --json tagName --jq '.[0].tagName // ""')
+          if [[ -z "$previous" ]]; then
+            printf 'Initial release at %s.\n' "$GITHUB_SHA" > "$notes"
+            exit 0
+          fi
+          compare="repos/$GITHUB_REPOSITORY/compare/$previous...$GITHUB_SHA"
+          status=$(gh api "$compare" --jq '.status')
+          if [[ "$status" != ahead ]]; then
+            printf 'Release notes rejected: %s is %s relative to %s, expected ahead\n' "$GITHUB_SHA" "$status" "$previous" >&2
+            exit 1
+          fi
+          {
+            printf '## Changes since %s\n\n' "$previous"
+            gh api --paginate "$compare?per_page=100" --jq '.commits[] | "- \(.sha[0:12]) \(.commit.message | split("\n")[0])"'
+            printf '\n**Full changelog**: %s/%s/compare/%s...%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$previous" "$GITHUB_SHA"
+          } > "$notes"
+
+      - name: Create pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: release-${{ github.sha }}
+        run: |
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --verify-tag \
+            --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" .work/release/*
