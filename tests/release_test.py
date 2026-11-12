@@ -12,12 +12,14 @@ REVISION = "a" * 40
 
 
 def part(assets: Path, target: str, revision: str = REVISION) -> dict:
-    archive = assets / f"{target}-full.tar.gz"
+    archive = assets / f"pi-full-1.5.0-{target}.tar.xz"
     archive.write_bytes(target.encode())
+    sha256 = hashlib.sha256(target.encode()).hexdigest()
+    (assets / f"pi-full-1.5.0-{target}.manifest.json").write_text(json.dumps({"sha256": sha256, "source_revision": revision}))
     return {
-        "schema": 1, "builder_revision": revision, "profile": "full", "sources_sha256": "s", "components": {"c": "x"},
-        "targets": {target: {"target": target, "profile": "full", "archive": archive.name,
-                             "sha256": hashlib.sha256(target.encode()).hexdigest(), "bytes": len(target)}},
+        "schema": 1, "builder_revision": revision, "profile": "full", "product": "pi-full", "version": "1.5.0",
+        "sources_sha256": "s", "components": {"c": "x"},
+        "targets": {target: {"target": target, "profile": "full", "archive": archive.name, "sha256": sha256, "bytes": len(target)}},
         "inputs": {target: {"lock_sha256": target}},
     }
 
@@ -41,6 +43,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(provenance["builder_revision"], REVISION)
             self.assertEqual(set(record), {"target", "profile", "archive", "sha256", "bytes"})
             self.assertEqual([entry for entry in sums if entry[1] == record["archive"]], [[record["sha256"], record["archive"]]])
+        self.assertEqual([entry[1] for entry in sums], sorted(path.name for path in self.assets.iterdir() if path.name != "SHA256SUMS"))
 
     def test_rejects_targets_built_at_different_revisions(self):
         parts = [part(self.assets, target) for target in TARGETS[:2]] + [part(self.assets, TARGETS[2], "b" * 40)]
@@ -53,13 +56,19 @@ class ReleaseTests(unittest.TestCase):
 
     def test_rejects_archive_that_differs_from_its_record(self):
         parts = [part(self.assets, target) for target in TARGETS]
-        (self.assets / "linux-x64-full.tar.gz").write_bytes(b"tampered!")
-        with self.assertRaisesRegex(ValueError, "mismatch for linux-x64"):
+        (self.assets / "pi-full-1.5.0-x86_64-unknown-linux-musl.tar.xz").write_bytes(b"tampered!")
+        with self.assertRaisesRegex(ValueError, "mismatch for x86_64-unknown-linux-musl"):
+            merge(self.assets, parts)
+
+    def test_rejects_manifest_that_differs_from_its_archive_record(self):
+        parts = [part(self.assets, target) for target in TARGETS]
+        (self.assets / "pi-full-1.5.0-aarch64-apple-darwin.manifest.json").write_text(json.dumps({"sha256": "0" * 64, "source_revision": REVISION}))
+        with self.assertRaisesRegex(ValueError, "manifest differs from provenance for aarch64-apple-darwin"):
             merge(self.assets, parts)
 
     def test_rejects_target_record_with_extra_identity_fields(self):
         parts = [part(self.assets, target) for target in TARGETS]
-        parts[0]["targets"]["darwin-arm64"]["builder_revision"] = REVISION
+        parts[0]["targets"]["aarch64-apple-darwin"]["builder_revision"] = REVISION
         with self.assertRaisesRegex(ValueError, "invalid target record"):
             merge(self.assets, parts)
 

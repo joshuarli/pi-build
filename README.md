@@ -4,24 +4,31 @@ Use the maintainer build to create deterministic, locked Pi runtime archives fro
 
 ## Build a native target
 
-The build requires Node.js 26.13.0, npm 12.2.2, Python 3.15.1, and jaq 3.1.2. `sh tools/toolchain.sh TARGET` downloads them under `.work/toolchain/TARGET`, checks each digest in `tools/toolchain.pins`, and prints the bin directory and Python path. Put that directory first on `PATH` and pass `PYTHON=` to `make`. `make prepare TARGET=darwin-arm64 PROFILE=full` downloads production dependencies and writes the target package lock and local source-package tarballs under `locks/`. Run this command only when preparing or intentionally refreshing build inputs.
+`TARGET` is a Rust target triple: `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, or `aarch64-unknown-linux-musl`.
+
+The build requires the Node.js, npm, Python, and jaq versions in `bootstrap.lock.json`. `sh tools/toolchain.sh TARGET` downloads them under `.work/toolchain/TARGET`, checks each digest in `sources.lock.json`, and prints the bin directory and Python path. It bootstraps jaq from the same lock when none is on `PATH`. Put that directory first on `PATH` and pass `PYTHON=` to `make`. `make prepare TARGET=aarch64-apple-darwin PROFILE=full` downloads production dependencies and writes the target package lock and local source-package tarballs under `locks/`. Run this command only when preparing or intentionally refreshing build inputs.
 
 Build and verify with:
 
 ```sh
-make build TARGET=darwin-arm64 PROFILE=full
-make verify TARGET=darwin-arm64 PROFILE=full
-make repro TARGET=darwin-arm64 PROFILE=full
+make build TARGET=aarch64-apple-darwin PROFILE=full
+make verify TARGET=aarch64-apple-darwin PROFILE=full
+make repro TARGET=aarch64-apple-darwin PROFILE=full
 make sizes PROFILE=full
+make test
+make lint
+make clean
 ```
 
-The build requires a native runner for `TARGET`. It supports `darwin-arm64`, `linux-x64`, and `linux-arm64`. A successful build on one target says nothing about the others or Linux musl execution. The `Build Pi runtime` workflow runs `prepare` (Linux lock artifacts for review and commit) or `build` (repeat build and verify on each native runner, then CLI and SDK loader checks of the Linux archives under Alpine musl Node).
+The build requires a native runner for `TARGET`. A successful build on one target says nothing about the others. The `Prepare locks` workflow writes Linux lock artifacts for review and commit. The `release` workflow repeats the build and verification on each native runner, runs CLI and SDK loader checks of the Linux archives under Alpine musl Node, and publishes a prerelease. `make lint` runs ruff and ty on `tools/` and `tests/` through `uv`.
+
+`sources.lock.json` pins the toolchain downloads by URL and SHA-256. `bootstrap.lock.json` pins the toolchain versions that `tools/build.sh` asserts and lists the inputs each target installs. npm packages are pinned by the lockfiles under `locks/`, which resolve from the stuff registry (`https://npm.17166969.xyz/current/`) as set in each directory's `.npmrc`.
 
 `make build` uses the committed package locks and local source tarballs. It runs `npm ci` in an isolated work directory. It fails if source tarballs differ from the prepared inputs. `make verify` checks the archive manifest and digest, extracts the archive, starts the CLI, and loads and binds the subagents, intercom, and Muse extensions. Its Muse fixture confirms that offline startup registers the approved Ember and Spark models without launching `muse` for catalog refresh.
 
 ## Read provenance
 
-Each archive is `dist/<profile>/<target>-<profile>.tar.gz`. The matching `.manifest.json` records the archive digest, byte count, and package payload inventory. `SHA256SUMS` contains archive digests. `provenance.json` records the builder revision, source snapshot digest, target artifact identities, package lock digests, patch digest, builder tool digest, and tool versions.
+Each release has, per target, `pi-<profile>-<version>-<target>.tar.xz` and `pi-<profile>-<version>-<target>.manifest.json` (for example `pi-full-1.5.0-aarch64-apple-darwin.tar.xz`). The manifest records the product, version, target, source revision, `sources.lock.json` digest, archive digest, byte count, and package payload inventory. `SHA256SUMS` covers every other release asset. `provenance.json` records the builder revision, source snapshot digest, target artifact identities, package lock digests, patch digest, builder tool digest, and tool versions.
 
 The Pi CLI and SDK are exact-version precompiled registry packages whose package integrity values are in the npm lock. The intercom core is compiled from its preserved source. The Pi adapters are packed from preserved source snapshots. `patches/muse-offline-catalog.patch` applies only to the copied Muse source during packaging. `sources/` remains unchanged.
 

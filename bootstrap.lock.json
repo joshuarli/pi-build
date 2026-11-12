@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "tools": {
+    "node": "26.13.0",
+    "npm": "12.2.2",
+    "python": "3.15.1",
+    "jaq": "3.1.2"
+  },
+  "targets": {
+    "aarch64-apple-darwin": [
+      "node-aarch64-apple-darwin",
+      "npm",
+      "python-aarch64-apple-darwin",
+      "jaq-aarch64-apple-darwin"
+    ],
+    "x86_64-unknown-linux-musl": [
+      "node-x86_64-unknown-linux-musl",
+      "npm",
+      "python-x86_64-unknown-linux-musl",
+      "jaq-x86_64-unknown-linux-musl"
+    ],
+    "aarch64-unknown-linux-musl": [
+      "node-aarch64-unknown-linux-musl",
+      "npm",
+      "python-aarch64-unknown-linux-musl",
+      "jaq-aarch64-unknown-linux-musl"
+    ]
+  },
+  "musl_check": {
+    "x86_64-unknown-linux-musl": "node-musl-x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl": "node-musl-aarch64-unknown-linux-musl"
+  }
+}
