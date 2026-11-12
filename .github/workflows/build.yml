@@ -25,7 +25,10 @@ jobs:
           persist-credentials: false
       - name: Install musl loader for pinned Python
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends musl
+        run: |
+          loader=ld-musl-$(uname -m).so.1
+          docker run --rm -v "$RUNNER_TEMP:/out" alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f cp "/lib/$loader" /out/
+          sudo install -m 755 "$RUNNER_TEMP/$loader" "/lib/$loader"
       - name: Install pinned toolchain
         run: |
           out=$(sh tools/toolchain.sh "${{ matrix.target }}")
@@ -57,7 +60,10 @@ jobs:
           persist-credentials: false
       - name: Install musl loader for pinned Python
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends musl
+        run: |
+          loader=ld-musl-$(uname -m).so.1
+          docker run --rm -v "$RUNNER_TEMP:/out" alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f cp "/lib/$loader" /out/
+          sudo install -m 755 "$RUNNER_TEMP/$loader" "/lib/$loader"
       - name: Install pinned toolchain
         run: |
           out=$(sh tools/toolchain.sh "${{ matrix.target }}")
@@ -95,7 +101,10 @@ jobs:
           path: dist/full
       - name: Install musl loader for pinned Python
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends musl
+        run: |
+          loader=ld-musl-$(uname -m).so.1
+          docker run --rm -v "$RUNNER_TEMP:/out" alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f cp "/lib/$loader" /out/
+          sudo install -m 755 "$RUNNER_TEMP/$loader" "/lib/$loader"
       - name: Extract verified archive
         run: |
           python=$(sh tools/toolchain.sh "${{ matrix.target }}" | sed -n 2p)
