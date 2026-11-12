@@ -56,9 +56,9 @@ def load() -> dict:
     return data
 
 
-def check(data: dict) -> None:
+def check(data: dict, root: Path = ROOT) -> None:
     for name, src in data["sources"].items():
-        folder = ROOT / src["path"]
+        folder = root / src["path"]
         if not folder.is_dir():
             raise ValueError(f"missing source directory: {folder}")
         expected = src["files"]
@@ -70,6 +70,23 @@ def check(data: dict) -> None:
         if missing or extra or modified:
             raise ValueError(f"{name}: missing={missing[:8]}, extra={extra[:8]}, changed={modified[:8]}")
         print(f"ok: {name} {len(actual)} files upstream={src['sha']}")
+
+
+def materialize(data: dict, destination: Path, root: Path = ROOT) -> None:
+    """Copy only manifest-listed, verified files into a clean build input tree."""
+    check(data, root)
+    for name, src in data["sources"].items():
+        folder = root / src["path"]
+        for path in folder.rglob("*"):
+            if path.is_symlink():
+                raise ValueError(f"symlink in upstream snapshot: {path}")
+        output = destination / name
+        output.mkdir(parents=True)
+        for relative in sorted(src["files"]):
+            source = folder / relative
+            target = output / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
 
 
 def command(*args: str, cwd: Path | None = None) -> str:

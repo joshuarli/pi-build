@@ -1,0 +1,24 @@
+{
+  "name": "usr-pi-offline-runtime",
+  "private": true,
+  "version": "1.5.0",
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-tui": "1.5.0",
+    "@earendil-works/pi-agent-core": "1.5.0",
+    "@dataforxyz/agent-intercom-core": "file:tars/core.tgz",
+    "@dataforxyz/agent-intercom-pi": "file:tars/intercom.tgz",
+    "pi-subagents": "file:tars/subagents.tgz",
+    "pi-muse-subscription": "file:tars/muse.tgz",
+    "tsx": "4.20.6",
+    "typebox": "1.3.27",
+    "yaml": "2.8.3"
+  },
+  "overrides": {
+    "@types/node": "24.19.2",
+    "encodeurl": "2.0.1",
+    "undici-types": "7.24.6"
+  }
+}
