@@ -4,7 +4,7 @@ Use the maintainer build to create deterministic, locked Pi runtime archives fro
 
 ## Build a native target
 
-Install the pinned tools: Node.js 26.13.0, npm 12.2.2, Python 3.15.1, and jaq 3.1.2. `make prepare TARGET=darwin-arm64 PROFILE=full` downloads production dependencies and writes the target package lock and local source-package tarballs under `locks/`. Run this command only when preparing or intentionally refreshing build inputs.
+The build requires Node.js 26.13.0, npm 12.2.2, Python 3.15.1, and jaq 3.1.2. `sh tools/toolchain.sh TARGET` downloads them under `.work/toolchain/TARGET`, checks each digest in `tools/toolchain.pins`, and prints the bin directory and Python path. Put that directory first on `PATH` and pass `PYTHON=` to `make`. `make prepare TARGET=darwin-arm64 PROFILE=full` downloads production dependencies and writes the target package lock and local source-package tarballs under `locks/`. Run this command only when preparing or intentionally refreshing build inputs.
 
 Build and verify with:
 
@@ -15,7 +15,7 @@ make repro TARGET=darwin-arm64 PROFILE=full
 make sizes PROFILE=full
 ```
 
-The build requires a native runner for `TARGET`. It supports `darwin-arm64`, `linux-x64`, and `linux-arm64`. A successful build on one target says nothing about the others or Linux musl execution.
+The build requires a native runner for `TARGET`. It supports `darwin-arm64`, `linux-x64`, and `linux-arm64`. A successful build on one target says nothing about the others or Linux musl execution. The `Build Pi runtime` workflow runs `prepare` (Linux lock artifacts for review and commit) or `build` (repeat build and verify on each native runner, then CLI and SDK loader checks of the Linux archives under Alpine musl Node).
 
 `make build` uses the committed package locks and local source tarballs. It runs `npm ci` in an isolated work directory. It fails if source tarballs differ from the prepared inputs. `make verify` checks the archive manifest and digest, extracts the archive, starts the CLI, and loads and binds the subagents, intercom, and Muse extensions. Its Muse fixture confirms that offline startup registers the approved Ember and Spark models without launching `muse` for catalog refresh.
 

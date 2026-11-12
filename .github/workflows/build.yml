@@ -1,0 +1,107 @@
+name: Build Pi runtime
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: prepare writes Linux locks as artifacts; build verifies committed locks on every target
+        type: choice
+        options: [build, prepare]
+        default: build
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: inputs.mode == 'prepare'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-24.04 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain
+        run: |
+          out=$(sh tools/toolchain.sh "${{ matrix.target }}")
+          printf '%s\n' "$out" | sed -n 1p >> "$GITHUB_PATH"
+          printf 'PYTHON=%s\n' "$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
+      - name: Prepare locks
+        run: make prepare TARGET="${{ matrix.target }}" PROFILE=full PYTHON="$PYTHON"
+      - name: Require shared core lock unchanged
+        run: git diff --exit-code -- locks/core-build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: locks-${{ matrix.target }}
+          path: locks/${{ matrix.target }}
+          if-no-files-found: error
+
+  build:
+    if: inputs.mode == 'build'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: darwin-arm64, runner: macos-26 }
+          - { target: linux-x64, runner: ubuntu-24.04 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain
+        run: |
+          out=$(sh tools/toolchain.sh "${{ matrix.target }}")
+          printf '%s\n' "$out" | sed -n 1p >> "$GITHUB_PATH"
+          printf 'PYTHON=%s\n' "$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
+      - name: Build twice and verify
+        run: make repro verify TARGET="${{ matrix.target }}" PROFILE=full PYTHON="$PYTHON"
+      - name: Require committed inputs unchanged
+        run: git diff --exit-code -- locks sources patches
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            dist/full/${{ matrix.target }}-full.tar.gz
+            dist/full/${{ matrix.target }}-full.tar.gz.manifest.json
+            dist/full/provenance.json
+          if-no-files-found: error
+
+  musl:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-24.04 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/full
+      - name: Extract verified archive
+        run: |
+          python=$(sh tools/toolchain.sh "${{ matrix.target }}" | sed -n 2p)
+          artifact=dist/full/${{ matrix.target }}-full.tar.gz
+          "$python" -I tools/archive.py verify "$artifact" "$artifact.manifest.json" "${{ matrix.target }}" full >/dev/null
+          mkdir -p .work/musl/runtime
+          "$python" -I tools/archive.py unpack "$artifact" .work/musl/runtime
+      - name: Run CLI and SDK loader under musl
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f sh -euc '
+            apk add --no-cache curl libstdc++ >/dev/null
+            bin=$(sh tools/toolchain.sh "${{ matrix.target }}-musl" | sed -n 1p)
+            export PATH="$bin:$PATH" TMPDIR=/w/.work/tmp
+            mkdir -p "$TMPDIR"
+            ldd "$bin/node" | grep -q musl
+            node .work/musl/runtime/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js --version
+            node tools/verify.mjs /w/.work/musl/runtime
+          '

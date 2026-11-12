@@ -1,0 +1,15 @@
+# <target> <tool> <url> <sha256>
+darwin-arm64 node https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-arm64.tar.xz 6f5b3187d9df9fc007e881167905bc7d69ad26450ddc377c83d63256a2495b6e
+darwin-arm64 npm https://registry.npmjs.org/npm/-/npm-12.2.2.tgz 07fecbf753e2c3bc10ebeb3e9ed8738f6a0cc1292998b79e2e9f1dd2a5525e0c
+darwin-arm64 python https://github.com/laputa-systems/python-build/releases/download/20261107/cpython-3.15.1+20261107-aarch64-apple-darwin-install_only_stripped.tar.gz d6c1622eac8354ac64ae0bf0f38ad06e6b0f71c3b64aac5dfcddff67472548bd
+darwin-arm64 jaq https://github.com/01mf02/jaq/releases/download/v3.1.2/jaq-aarch64-apple-darwin 977685a0d4138585055c25631ec6970ab666ce37aefc7f6786033548292d18ef
+linux-x64 node https://nodejs.org/dist/v26.13.0/node-v26.13.0-linux-x64.tar.xz d28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997
+linux-x64 npm https://registry.npmjs.org/npm/-/npm-12.2.2.tgz 07fecbf753e2c3bc10ebeb3e9ed8738f6a0cc1292998b79e2e9f1dd2a5525e0c
+linux-x64 python https://github.com/laputa-systems/python-build/releases/download/20261107/cpython-3.15.1+20261107-x86_64-unknown-linux-musl-install_only_stripped.tar.gz f8ecf313bb4b8f9e95dca30e9b3a098c564b691124f9c3f29a7ea9d71ffb5ea3
+linux-x64 jaq https://github.com/01mf02/jaq/releases/download/v3.1.2/jaq-x86_64-unknown-linux-musl a469f5e6980fe2c7e73dce0a1db5176eb4a717b933b77fa32fa1da7847c12232
+linux-x64-musl node https://unofficial-builds.nodejs.org/download/release/v26.13.0/node-v26.13.0-linux-x64-musl.tar.gz c6c738fe564c3eb053172bfd4ca1166eec8bc076f84231a2ea70165e316f5809
+linux-arm64 node https://nodejs.org/dist/v26.13.0/node-v26.13.0-linux-arm64.tar.xz 406fe3fbde1c054adff8b297c16fdb5af6659db327c1ac8acd46b56ef1af9a92
+linux-arm64 npm https://registry.npmjs.org/npm/-/npm-12.2.2.tgz 07fecbf753e2c3bc10ebeb3e9ed8738f6a0cc1292998b79e2e9f1dd2a5525e0c
+linux-arm64 python https://github.com/laputa-systems/python-build/releases/download/20261107/cpython-3.15.1+20261107-aarch64-unknown-linux-musl-install_only_stripped.tar.gz d166d0e08f423e2d71b767e9c15a402ea7af1896605b87fe3e09dda56a50d7ae
+linux-arm64 jaq https://github.com/01mf02/jaq/releases/download/v3.1.2/jaq-aarch64-unknown-linux-gnu 1aa1b9c0a3b73f016f6a8d407fa21a89174d01a8e4b9df449eaad49603426734
+linux-arm64-musl node https://unofficial-builds.nodejs.org/download/release/v26.13.0/node-v26.13.0-linux-arm64-musl.tar.gz f3dda772ba0c1f2cd6fec46f6ec24687584767f2c3f9117a47edf191e7786720
