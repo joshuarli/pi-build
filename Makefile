@@ -26,6 +26,7 @@ verify:
 	$(PYTHON) -I tools/archive.py unpack "$(ARTIFACT)" "$(VERIFY_ROOT)"
 	$(NODE) "$(VERIFY_ROOT)/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" --version
 	TMPDIR="$(CURDIR)/.work/tmp" $(NODE) tools/verify.mjs "$(CURDIR)/$(VERIFY_ROOT)"
+	TMPDIR="$(CURDIR)/.work/tmp" $(NODE) tools/verify-providers.mjs "$(CURDIR)/$(VERIFY_ROOT)" "$(PROFILE)"
 
 repro: build
 	$(NODE) --version

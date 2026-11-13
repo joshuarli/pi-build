@@ -1,11 +1,18 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, symlinkSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const runtime = process.argv[2];
 if (!runtime) throw new Error("usage: node tools/verify.mjs EXTRACTED_ROOT");
 const modules = join(runtime, "node_modules");
-const work = join(process.cwd(), ".work/verify");
+function extensionPath(name) {
+  const pkg = JSON.parse(readFileSync(join(modules, name, "package.json"), "utf8"));
+  return join(modules, name, pkg.pi.extensions[0]);
+}
+const scratch = join(process.cwd(), ".work/verify");
+mkdirSync(scratch, { recursive: true });
+const work = mkdtempSync(join(scratch, "fixture-"));
+try {
 const cwd = join(work, "cwd");
 const binDir = join(work, "bin");
 const museCalls = join(work, "muse-calls");
@@ -48,9 +55,9 @@ const resourceLoader = new sdk.DefaultResourceLoader({
   noThemes: true,
   noContextFiles: true,
   additionalExtensionPaths: [
-    join(modules, "pi-subagents/index.ts"),
-    join(modules, "@dataforxyz/agent-intercom-pi/index.ts"),
-    join(modules, "pi-muse-subscription/src/index.ts"),
+    extensionPath("pi-subagents"),
+    extensionPath("@dataforxyz/agent-intercom-pi"),
+    extensionPath("pi-muse-subscription"),
   ],
 });
 await resourceLoader.reload();
@@ -79,4 +86,7 @@ try {
 } finally {
   await emitSessionShutdownEvent(session.extensionRunner, { type: "session_shutdown", reason: "quit" });
   session.dispose();
+}
+} finally {
+  rmSync(work, { recursive: true, force: true });
 }

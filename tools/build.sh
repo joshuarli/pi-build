@@ -10,7 +10,7 @@ product=pi-$profile
 paths=$("$PYTHON" -c 'from pathlib import Path; import sys; root=Path(sys.argv[1]).resolve(); work=Path(sys.argv[2]).resolve(); output=Path(sys.argv[3]).resolve(); allowed_work=(root/".work").resolve(); allowed_dist=(root/"dist").resolve(); assert work.is_relative_to(allowed_work), f"build path escapes .work: {work}"; assert output.is_relative_to(allowed_dist) or output.is_relative_to(allowed_work), f"output path escapes dist/.work: {output}"; print(work); print(output)' "$root" "$work" "$output")
 work=$(printf '%s\n' "$paths" | sed -n '1p')
 output=$(printf '%s\n' "$paths" | sed -n '2p')
-if [[ "$profile" != full ]]; then
+if [[ "$profile" != full && "$profile" != headless-usr ]]; then
     printf 'unsupported profile: %s\n' "$profile" >&2
     exit 2
 fi
@@ -99,6 +99,9 @@ cp "$lockdir/.npmrc" "$work/runtime/.npmrc"
 mkdir -p "$work/runtime/tars"
 cp "$lockdir/tars/"*.tgz "$work/runtime/tars/"
 (cd "$work/runtime" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --install-strategy=hoisted)
+if [[ "$profile" == headless-usr ]]; then
+    node "$root/tools/headless.mjs" "$work/runtime" "$work/packages/agent-intercom-core/node_modules/typescript/lib/typescript.js"
+fi
 node "$work/runtime/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" --version
 revision=$(git -C "$root" rev-parse HEAD)
 "$PYTHON" -I "$root/tools/archive.py" archive "$work/runtime" "$output" "$product" "$version" "$target" "$profile" "$revision" >/dev/null
@@ -106,7 +109,7 @@ provenance=$root/dist/$profile/provenance.json
 source_digest=$(shasum -a 256 "$root/sources/upstreams.json" | awk '{print $1}')
 patch_digest=$(shasum -a 256 "$root/patches/muse-offline-catalog.patch" | awk '{print $1}')
 lock_digest=$(shasum -a 256 "$lockdir/package-lock.json" | awk '{print $1}')
-builder_tools_digest=$(cat "$root/tools/build.sh" "$root/tools/pack.py" "$root/tools/archive.py" | shasum -a 256 | awk '{print $1}')
+builder_tools_digest=$(cat "$root/tools/build.sh" "$root/tools/pack.py" "$root/tools/archive.py" "$root/tools/headless.mjs" | shasum -a 256 | awk '{print $1}')
 node_version=$(node --version)
 npm_version=$(npm --version)
 python_version=$("$PYTHON" --version)
@@ -124,7 +127,7 @@ fi
 tmp=$provenance.tmp
 jaq --arg revision "$revision" --arg product "$product" --arg version "$version" --arg source "$source_digest" --arg patch "$patch_digest" --arg target "$target" --arg profile "$profile" --arg archive "$(basename "$output")" --arg sha "$archive_sha" \
     --arg lock "$lock_digest" --arg core "$core_lock_digest" --arg tools "$builder_tools_digest" --arg node "$node_version" --arg npm "$npm_version" --arg python "$python_version" --arg jaq "$jaq_version" --arg zlib "$zlib_version" --argjson bytes "$archive_bytes" \
-    '.builder_revision=$revision | .profile=$profile | .product=$product | .version=$version | .sources_sha256=$source | .components //= {pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed",muse_adapter:"source-snapshot-packed+patch"} | .targets[$target]={target:$target,profile:$profile,archive:$archive,sha256:$sha,bytes:$bytes} | .inputs[$target]={lock_sha256:$lock,core_build_lock_sha256:$core,builder_tools_sha256:$tools,patches:{muse_offline_catalog_sha256:$patch},toolchain:{node:$node,npm:$npm,python:$python,jaq:$jaq,zlib:$zlib}}' \
+    '.builder_revision=$revision | .profile=$profile | .product=$product | .version=$version | .sources_sha256=$source | .components //= {pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed",muse_adapter:"source-snapshot-packed+patch"} | .components.pi_subagents=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.intercom_pi=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.muse_adapter=(if $profile == "headless-usr" then "source-snapshot-packed+patch+compiled" else "source-snapshot-packed+patch" end) | .components.pi_ai=(if $profile == "headless-usr" then "verified-precompiled-registry-package+bedrock-disabled" else "verified-precompiled-registry-package" end) | .targets[$target]={target:$target,profile:$profile,archive:$archive,sha256:$sha,bytes:$bytes} | .inputs[$target]={lock_sha256:$lock,core_build_lock_sha256:$core,builder_tools_sha256:$tools,patches:{muse_offline_catalog_sha256:$patch},toolchain:{node:$node,npm:$npm,python:$python,jaq:$jaq,zlib:$zlib}}' \
     "$provenance" > "$tmp"
 mv "$tmp" "$provenance"
 (cd "$(dirname "$output")" && : > SHA256SUMS && for artifact in *.tar.xz; do

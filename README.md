@@ -32,4 +32,16 @@ Each release has, per target, `pi-<profile>-<version>-<target>.tar.xz` and `pi-<
 
 The Pi CLI and SDK are exact-version precompiled registry packages whose package integrity values are in the npm lock. The intercom core is compiled from its preserved source. The Pi adapters are packed from preserved source snapshots. `patches/muse-offline-catalog.patch` applies only to the copied Muse source during packaging. `sources/` remains unchanged.
 
-The `full` profile is the only profile currently implemented. Runtime account entitlement, provider calls, Linux targets, and musl execution require separate verification. A deterministic repeat build proves identical bytes for the tested target and inputs only.
+`PROFILE=headless-usr` builds a reduced runtime from the same locked inputs. Packaging compiles the three extensions and Intercom broker with the pinned build-time TypeScript compiler. The archive excludes source maps and type declarations, `tsx`, esbuild, and the AWS/Smithy packages. Bedrock requests return an explicit unsupported-profile error. The full profile retains Bedrock support.
+
+The reduced profile preserves docs, examples, licenses, images, the interactive CLI, and OpenCode Go's Anthropic, Google, and OpenAI protocols. It supplies runtime SDK JavaScript without development declarations. Pi retains `jiti` for user-provided extensions. `headless-usr` describes the intended consumer rather than a dedicated CLI entry point without interactive code.
+
+Build and verify the reduced profile with `make repro verify PROFILE=headless-usr`. `make verify` checks all four OpenCode Go protocols with offline streaming fixtures. For the reduced profile, it also checks Bedrock rejection. `tools/release.py` merges one profile's three target builds into a separate asset directory. The hosted release workflow currently selects `full`; publication of the reduced profile requires a separate release configuration and verification of every target.
+
+The `usr` installer accepts an absolute `USR_PI_RUNTIME_PIN` path to a reviewed pin in the existing release-pin format. Without that setting, it uses its committed full-profile pin. Selecting a different pin changes the single installed runtime selection, launcher paths, and managed broker configuration. Custom broker commands remain unchanged. A missing selected pin fails installation without falling back to another profile.
+
+The npm 12 builder may require `npm_config_allow_remote=all` when its remote-package policy rejects the locked registry tarball URLs. This setting applies to the build command; scripts remain disabled and npm verifies the committed integrity values. No runtime package installation is required.
+
+Runtime account entitlement and live provider calls require separate verification. A deterministic repeat build proves identical bytes for the tested target and inputs only.
+
+See [headless runtime verification](docs/verification/headless-usr.md) for the size comparison, tested behaviors, and remaining delivery work.

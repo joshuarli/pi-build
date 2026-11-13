@@ -11,20 +11,26 @@ from tools.release import TARGETS, merge, write
 REVISION = "a" * 40
 
 
-def part(assets: Path, target: str, revision: str = REVISION) -> dict:
-    archive = assets / f"pi-full-1.5.0-{target}.tar.xz"
+def part(assets: Path, target: str, revision: str = REVISION, profile: str = "full") -> dict:
+    archive = assets / f"pi-{profile}-1.5.0-{target}.tar.xz"
     archive.write_bytes(target.encode())
     sha256 = hashlib.sha256(target.encode()).hexdigest()
-    (assets / f"pi-full-1.5.0-{target}.manifest.json").write_text(json.dumps({"sha256": sha256, "source_revision": revision}))
+    (assets / f"pi-{profile}-1.5.0-{target}.manifest.json").write_text(json.dumps({"sha256": sha256, "source_revision": revision}))
     return {
-        "schema": 1, "builder_revision": revision, "profile": "full", "product": "pi-full", "version": "1.5.0",
+        "schema": 1, "builder_revision": revision, "profile": profile, "product": f"pi-{profile}", "version": "1.5.0",
         "sources_sha256": "s", "components": {"c": "x"},
-        "targets": {target: {"target": target, "profile": "full", "archive": archive.name, "sha256": sha256, "bytes": len(target)}},
+        "targets": {target: {"target": target, "profile": profile, "archive": archive.name, "sha256": sha256, "bytes": len(target)}},
         "inputs": {target: {"lock_sha256": target}},
     }
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_headless_release_retains_its_profile_identity(self):
+        merged = merge(self.assets, [part(self.assets, target, profile="headless-usr") for target in TARGETS])
+        self.assertEqual(merged["product"], "pi-headless-usr")
+        self.assertEqual(merged["profile"], "headless-usr")
+        self.assertTrue(all(record["archive"].startswith("pi-headless-usr-") for record in merged["targets"].values()))
+
     def setUp(self):
         Path(".work/tmp").mkdir(parents=True, exist_ok=True)
         self.directory = tempfile.TemporaryDirectory(dir=".work/tmp")

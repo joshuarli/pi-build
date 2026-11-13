@@ -20,9 +20,12 @@ def manifest_path(archive_path):
 
 
 def archive(source, output, product, version, target, profile, source_revision):
+    if profile not in {"full", "headless-usr"}:
+        raise ValueError(f"unsupported profile: {profile}")
     root = Path(source)
     output = Path(output)
     modules = root / "node_modules"
+    inventory = {}
     with (
         output.open("wb") as raw,
         lzma.LZMAFile(raw, "wb", format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=9) as compressed,
@@ -30,22 +33,20 @@ def archive(source, output, product, version, target, profile, source_revision):
     ):
         for path in sorted(modules.rglob("*"), key=lambda item: item.relative_to(modules).as_posix()):
             relative = path.relative_to(modules).as_posix()
+            if profile == "headless-usr" and path.name.endswith((".map", ".d.ts", ".d.mts", ".d.cts")):
+                continue
             info = bundle.gettarinfo(str(path), arcname="node_modules/" + relative)
             info.uid = info.gid = 0
             info.uname = info.gname = ""
             info.mtime = 0
             if info.isfile():
+                parts = path.relative_to(modules).parts
+                package = "/".join(parts[:2]) if parts[0].startswith("@") else parts[0]
+                inventory[package] = inventory.get(package, 0) + info.size
                 with path.open("rb") as stream:
                     bundle.addfile(info, stream)
             else:
                 bundle.addfile(info)
-    inventory = {}
-    for package in sorted((root / "node_modules").iterdir()):
-        if package.name.startswith("@"):
-            for scoped in sorted(package.iterdir()):
-                inventory[package.name + "/" + scoped.name] = sum(p.stat().st_size for p in scoped.rglob("*") if p.is_file() and not p.is_symlink())
-        else:
-            inventory[package.name] = sum(p.stat().st_size for p in package.rglob("*") if p.is_file() and not p.is_symlink())
     manifest = {
         "schema_version": 1,
         "product": product,

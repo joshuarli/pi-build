@@ -11,6 +11,33 @@ from tools.archive import archive, manifest_path, validate_members, verify
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_headless_filters_types_and_maps_but_preserves_documentation(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory)
+            package = root / "input/node_modules/@scope/example"
+            package.mkdir(parents=True)
+            files = {"index.js": "export default 1\n", "README.md": "read me", "LICENSE": "license",
+                     "docs/guide.md": "guide", "examples/extension.ts": "export default 1",
+                     "index.js.map": "map", "index.d.ts": "types", "index.d.mts": "types", "index.d.cts": "types"}
+            for name, content in files.items():
+                path = package / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+            for profile in ("full", "headless-usr"):
+                output = root / f"{profile}.tar.xz"
+                manifest = archive(root / "input", output, f"pi-{profile}", "1.5.0", "aarch64-apple-darwin", profile, "abc123")
+                expected = {name: content for name, content in files.items()
+                            if profile == "full" or not name.endswith((".map", ".d.ts", ".d.mts", ".d.cts"))}
+                with tarfile.open(output) as bundle:
+                    actual = {}
+                    for member in bundle:
+                        if member.isfile():
+                            stream = bundle.extractfile(member)
+                            assert stream is not None
+                            actual[member.name.removeprefix("node_modules/@scope/example/")] = stream.read().decode()
+                self.assertEqual(actual, expected)
+                self.assertEqual(manifest["packages"], {"@scope/example": sum(len(value) for value in expected.values())})
+
     def test_same_tree_has_same_archive_and_manifest_identity(self):
         with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
             root = Path(directory)
