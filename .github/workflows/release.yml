@@ -2,6 +2,14 @@ name: release
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Runtime profile to build and publish
+        type: choice
+        options:
+          - full
+          - headless-usr
+        default: full
 
 permissions: {}
 
@@ -21,6 +29,8 @@ jobs:
       contents: read
     outputs:
       default_branch: ${{ steps.ref.outputs.default_branch }}
+      profile: ${{ steps.ref.outputs.profile }}
+      release_tag: ${{ steps.ref.outputs.release_tag }}
     steps:
       - name: Require the default branch
         id: ref
@@ -29,13 +39,21 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           REPOSITORY: ${{ github.repository }}
+          PROFILE: ${{ inputs.profile }}
         run: |
           default_branch=$(gh api "repos/$REPOSITORY" --jq '.default_branch')
           if [[ "$EVENT_NAME" != workflow_dispatch || "$REF" != "refs/heads/$default_branch" ]]; then
             echo "Release dispatch rejected: expected workflow_dispatch on refs/heads/$default_branch, got $EVENT_NAME on $REF" >&2
             exit 1
           fi
+          case "$PROFILE" in
+            full) release_tag="release-${GITHUB_SHA}" ;;
+            headless-usr) release_tag="release-headless-usr-${GITHUB_SHA}" ;;
+            *) echo "Release dispatch rejected: unknown profile $PROFILE" >&2; exit 1 ;;
+          esac
           echo "default_branch=$default_branch" >> "$GITHUB_OUTPUT"
+          echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build (${{ matrix.target }})
@@ -44,6 +62,8 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+    env:
+      PROFILE: ${{ needs.preflight.outputs.profile }}
     strategy:
       fail-fast: false
       matrix:
@@ -68,16 +88,16 @@ jobs:
           printf '%s\n' "$out" | sed -n 1p >> "$GITHUB_PATH"
           printf 'PYTHON=%s\n' "$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
       - name: Build twice and verify
-        run: make repro verify TARGET="${{ matrix.target }}" PROFILE=full PYTHON="$PYTHON"
+        run: make repro verify TARGET="${{ matrix.target }}" PROFILE="$PROFILE" PYTHON="$PYTHON"
       - name: Require committed inputs unchanged
         run: git diff --exit-code -- locks sources patches
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-${{ matrix.target }}
           path: |
-            dist/full/pi-full-*-${{ matrix.target }}.tar.xz
-            dist/full/pi-full-*-${{ matrix.target }}.manifest.json
-            dist/full/provenance.json
+            dist/${{ needs.preflight.outputs.profile }}/pi-${{ needs.preflight.outputs.profile }}-*-${{ matrix.target }}.tar.xz
+            dist/${{ needs.preflight.outputs.profile }}/pi-${{ needs.preflight.outputs.profile }}-*-${{ matrix.target }}.manifest.json
+            dist/${{ needs.preflight.outputs.profile }}/provenance.json
           if-no-files-found: error
 
   musl:
@@ -87,6 +107,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      PROFILE: ${{ needs.preflight.outputs.profile }}
     strategy:
       fail-fast: false
       matrix:
@@ -101,7 +123,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist-${{ matrix.target }}
-          path: dist/full
+          path: dist/${{ needs.preflight.outputs.profile }}
       - name: Install musl loader for pinned Python
         if: runner.os == 'Linux'
         run: |
@@ -115,9 +137,9 @@ jobs:
           printf 'PYTHON=%s\n' "$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
       - name: Extract verified archive
         run: |
-          artifact=$(ls dist/full/pi-full-*-${{ matrix.target }}.tar.xz)
+          artifact=$(ls dist/"$PROFILE"/pi-"$PROFILE"-*-${{ matrix.target }}.tar.xz)
           manifest=${artifact%.tar.xz}.manifest.json
-          "$PYTHON" -I tools/archive.py verify "$artifact" "$manifest" "${{ matrix.target }}" full >/dev/null
+          "$PYTHON" -I tools/archive.py verify "$artifact" "$manifest" "${{ matrix.target }}" "$PROFILE" >/dev/null
           mkdir -p .work/musl/runtime
           "$PYTHON" -I tools/archive.py unpack "$artifact" .work/musl/runtime
       - name: Install musl Node
@@ -143,6 +165,9 @@ jobs:
     permissions:
       actions: read
       contents: write
+    env:
+      PROFILE: ${{ needs.preflight.outputs.profile }}
+      RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -155,7 +180,6 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ needs.preflight.outputs.default_branch }}
-          RELEASE_TAG: release-${{ github.sha }}
         run: |
           default_branch=$(gh api "repos/$REPOSITORY" --jq '.default_branch')
           if [[ "$EVENT_NAME" != workflow_dispatch || "$REF" != "refs/heads/$default_branch" || "$DEFAULT_BRANCH" != "$default_branch" ]]; then
@@ -188,14 +212,13 @@ jobs:
       - name: Merge provenance and checksums
         run: |
           mkdir -p .work/release
-          cp .work/dl/dist-*/pi-full-*.tar.xz .work/dl/dist-*/pi-full-*.manifest.json .work/release/
+          cp .work/dl/dist-*/pi-"$PROFILE"-*.tar.xz .work/dl/dist-*/pi-"$PROFILE"-*.manifest.json .work/release/
           "$PYTHON" -I tools/release.py .work/release .work/dl/dist-*/provenance.json
           (cd .work/release && sha256sum -c SHA256SUMS)
       - name: Create release tag at triggering SHA
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          RELEASE_TAG: release-${{ github.sha }}
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ needs.preflight.outputs.default_branch }}
@@ -224,10 +247,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes="$RUNNER_TEMP/release-notes.md"
-          previous=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1 \
-            --json tagName --jq '.[0].tagName // ""')
+          if [[ "$PROFILE" == "full" ]]; then
+            tag_pattern='^release-[0-9a-f]{40}$'
+          else
+            tag_pattern="^release-${PROFILE}-[0-9a-f]{40}\$"
+          fi
+          previous=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 50 \
+            --json tagName --jq "[.[] | select(.tagName | test(\"$tag_pattern\"))][0].tagName // \"\"")
           if [[ -z "$previous" ]]; then
-            printf 'Initial release at %s.\n' "$GITHUB_SHA" > "$notes"
+            printf 'Initial %s release at %s.\n' "$PROFILE" "$GITHUB_SHA" > "$notes"
             exit 0
           fi
           compare="repos/$GITHUB_REPOSITORY/compare/$previous...$GITHUB_SHA"
@@ -246,7 +274,6 @@ jobs:
       - name: Create pre-release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: release-${{ github.sha }}
         run: |
           gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --verify-tag \
             --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" .work/release/*
