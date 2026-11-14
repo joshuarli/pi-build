@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Apply reviewed Intercom changes to a verified, disposable source tree.
 
 The upstream snapshots and their blob inventory stay unchanged. Both native
@@ -9,11 +8,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCHES = ("intercom-tailnet-policy.patch", "intercom-tailnet-transport.patch")
