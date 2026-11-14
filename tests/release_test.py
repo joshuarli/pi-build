@@ -1,6 +1,8 @@
 import hashlib
+import io
 import json
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +11,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.release import TARGETS, merge, write
 
 REVISION = "a" * 40
+COMPANIONS = {
+    "agent-intercom-claude": "0.10.0",
+    "agent-intercom-codex": "0.10.0",
+    "agent-intercom-opencode": "0.10.0",
+}
+
+
+def write_companions(assets: Path) -> dict:
+    companions = {}
+    for name, version in COMPANIONS.items():
+        member = tarfile.TarInfo("package/package.json")
+        payload = json.dumps({"name": name, "version": version}).encode()
+        member.size = len(payload)
+        member.mtime = 0
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as bundle:
+            bundle.addfile(member, io.BytesIO(payload))
+        archive = assets / f"{name}-{version}.tgz"
+        archive.write_bytes(buffer.getvalue())
+        companions[name] = {
+            "archive": archive.name,
+            "version": version,
+            "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+            "bytes": archive.stat().st_size,
+            "source_sha": "c" * 40,
+        }
+    return companions
 
 
 def part(assets: Path, target: str, revision: str = REVISION, profile: str = "full") -> dict:
@@ -18,7 +47,7 @@ def part(assets: Path, target: str, revision: str = REVISION, profile: str = "fu
     (assets / f"pi-{profile}-1.5.0-{target}.manifest.json").write_text(json.dumps({"sha256": sha256, "source_revision": revision}))
     return {
         "schema": 1, "builder_revision": revision, "profile": profile, "product": f"pi-{profile}", "version": "1.5.0",
-        "sources_sha256": "s", "components": {"c": "x"},
+        "sources_sha256": "s", "components": {"c": "x"}, "companions": write_companions(assets),
         "targets": {target: {"target": target, "profile": profile, "archive": archive.name, "sha256": sha256, "bytes": len(target)}},
         "inputs": {target: {"lock_sha256": target}},
     }

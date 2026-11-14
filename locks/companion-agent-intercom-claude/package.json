@@ -1,0 +1,72 @@
+{
+  "name": "@dataforxyz/agent-intercom-claude",
+  "version": "0.10.0",
+  "description": "Claude Code MCP plugin and wakeable worker for direct local messaging with Pi, Codex, and Claude coding-agent sessions.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "dist/claude-server.mjs",
+  "bin": {
+    "claude-intercom-mcp": "dist/claude-server.mjs",
+    "claude-intercom-worker": "dist/worker-daemon.mjs",
+    "cci": "dist/cci.mjs",
+    "ccim": "dist/ccim.mjs"
+  },
+  "files": [
+    "assets/**/*",
+    "dist/**/*",
+    "claude/**/*.ts",
+    "broker/**/*.ts",
+    "scripts/**/*",
+    "skills/**/*",
+    "commands/**/*",
+    "types.ts",
+    "config.ts",
+    "durable-json.ts",
+    "outbound-outbox.ts",
+    ".claude-plugin/**/*",
+    ".mcp.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "licenses/**/*",
+    "COPYRIGHT",
+    "LICENSE_TRANSITION.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepare": "npm run build",
+    "claude:mcp": "tsx claude/server.ts",
+    "claude:worker": "tsx claude/worker-daemon.ts",
+    "cci": "tsx claude/cci.ts",
+    "ccim": "tsx claude/ccim.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test broker/client.test.ts broker/framing.test.ts broker/ownership.test.ts broker/paths.test.ts broker/spawn.test.ts outbound-outbox.test.ts claude/*.test.ts"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "mcp",
+    "intercom",
+    "multi-agent",
+    "pi",
+    "codex"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dataforxyz/agent-intercom-claude.git"
+  },
+  "homepage": "https://github.com/dataforxyz/agent-intercom-claude#readme",
+  "bugs": {
+    "url": "https://github.com/dataforxyz/agent-intercom-claude/issues"
+  }
+}

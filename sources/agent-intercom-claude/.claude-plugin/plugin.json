@@ -1,0 +1,26 @@
+{
+  "name": "claude-intercom",
+  "version": "0.1.0",
+  "description": "Claude Code MCP plugin and wakeable worker for local Pi/Codex/Claude intercom messaging.",
+  "author": {
+    "name": "dataforxyz",
+    "email": "support@datafor.xyz",
+    "url": "https://github.com/dataforxyz"
+  },
+  "homepage": "https://github.com/dataforxyz/agent-intercom-claude",
+  "repository": "https://github.com/dataforxyz/agent-intercom-claude",
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "intercom",
+    "claude",
+    "claude-code",
+    "codex",
+    "pi",
+    "multi-agent",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "monitors": "./monitors/monitors.json",
+  "mcpServers": "./.mcp.json"
+}

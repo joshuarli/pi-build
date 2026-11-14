@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "codex-intercom": {
+      "command": "node",
+      "args": [
+        "./dist/codex-server.mjs"
+      ]
+    }
+  }
+}

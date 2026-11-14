@@ -1,0 +1,75 @@
+{
+  "name": "@dataforxyz/agent-intercom-codex",
+  "version": "0.10.0",
+  "description": "Codex MCP plugin for direct local messaging with Pi and Codex coding-agent sessions.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/codex-server.mjs",
+  "bin": {
+    "codex-intercom-mcp": "dist/codex-server.mjs",
+    "codex-intercom-bridge": "dist/bridge-daemon.mjs",
+    "coi": "dist/coi.mjs"
+  },
+  "files": [
+    "assets/**/*",
+    "dist/**/*",
+    "codex/**/*.ts",
+    "!codex/**/*.test.ts",
+    "broker/**/*.ts",
+    "!broker/**/*.test.ts",
+    "scripts/**/*",
+    "skills/**/*",
+    "types.ts",
+    "config.ts",
+    "tsconfig.json",
+    "durable-json.ts",
+    "outbound-outbox.ts",
+    ".codex-plugin/**/*",
+    ".mcp.json",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "licenses/**/*",
+    "COPYRIGHT",
+    "LICENSE_TRANSITION.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepare": "npm run build",
+    "codex:mcp": "tsx codex/server.ts",
+    "codex:bridge": "tsx codex/bridge-daemon.ts",
+    "coi": "tsx codex/coi.ts",
+    "test": "tsx --test broker/client.test.ts broker/framing.test.ts broker/ownership.test.ts broker/paths.test.ts broker/spawn.test.ts outbound-outbox.test.ts codex/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "codex",
+    "mcp",
+    "intercom",
+    "multi-agent",
+    "pi"
+  ],
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dataforxyz/agent-intercom-codex.git"
+  },
+  "homepage": "https://github.com/dataforxyz/agent-intercom-codex#readme",
+  "bugs": {
+    "url": "https://github.com/dataforxyz/agent-intercom-codex/issues"
+  }
+}

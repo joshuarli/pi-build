@@ -5,21 +5,20 @@ Writes ASSET_DIR/provenance.json and ASSET_DIR/SHA256SUMS, which covers every
 other file in ASSET_DIR. Every archive and manifest the provenance names must
 already be in ASSET_DIR with the recorded digest and size.
 """
-import hashlib
 import json
 import sys
+import tarfile
 from pathlib import Path
 
-TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")
-SHARED = ("schema", "builder_revision", "profile", "product", "version", "sources_sha256", "components")
+from buildlib.hashing import sha256_file
+from buildlib.release import write_sha256sums
+from buildlib.targets import TRIPLES as TARGETS
+
+SHARED = ("schema", "builder_revision", "profile", "product", "version", "sources_sha256", "components", "companions")
+COMPANIONS = ("agent-intercom-claude", "agent-intercom-codex", "agent-intercom-opencode")
 
 
-def digest(path: Path) -> str:
-    sha = hashlib.sha256()
-    with path.open("rb") as stream:
-        while block := stream.read(1 << 20):
-            sha.update(block)
-    return sha.hexdigest()
+digest = sha256_file
 
 
 def merge(assets: Path, parts: list[dict]) -> dict:
@@ -55,6 +54,31 @@ def merge(assets: Path, parts: list[dict]) -> dict:
                 raise ValueError(f"manifest differs from provenance for {target}")
             merged["targets"][target] = record
             merged["inputs"][target] = part["inputs"][target]
+    companions = merged.get("companions")
+    if not isinstance(companions, dict) or set(companions) != set(COMPANIONS):
+        raise ValueError(f"release requires companions {', '.join(COMPANIONS)}")
+    for name, record in companions.items():
+        expected = {"archive", "version", "sha256", "bytes", "source_sha"}
+        if set(record) != expected or not all(isinstance(value, str) for value in (record["archive"], record["version"], record["sha256"], record["source_sha"])):
+            raise ValueError(f"invalid companion record {name}")
+        if type(record["bytes"]) is not int or record["bytes"] <= 0:
+            raise ValueError(f"invalid companion size {name}")
+        archive = assets / record["archive"]
+        if archive.name != record["archive"] or not archive.is_file() or archive.is_symlink():
+            raise ValueError(f"missing companion archive {archive}")
+        if archive.stat().st_size != record["bytes"] or digest(archive) != record["sha256"]:
+            raise ValueError(f"companion archive digest or size mismatch: {name}")
+        name_parts = Path(record["archive"]).parts
+        if len(name_parts) != 1:
+            raise ValueError(f"companion archive must not contain directories: {name}")
+        with tarfile.open(archive, "r:gz") as bundle:
+            members = bundle.getmembers()
+            if not members:
+                raise ValueError(f"companion archive is empty: {name}")
+            for member in members:
+                member_path = Path(member.name)
+                if member.name.startswith("/") or ".." in member_path.parts:
+                    raise ValueError(f"companion archive has unsafe member {member.name}: {name}")
     if sorted(merged["targets"]) != sorted(TARGETS):
         raise ValueError(f"release requires targets {', '.join(TARGETS)}")
     return merged
@@ -62,8 +86,7 @@ def merge(assets: Path, parts: list[dict]) -> dict:
 
 def write(assets: Path, merged: dict) -> None:
     (assets / "provenance.json").write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
-    names = sorted(path.name for path in assets.iterdir() if path.is_file() and path.name != "SHA256SUMS")
-    (assets / "SHA256SUMS").write_text("".join(f"{digest(assets / name)}  {name}\n" for name in names))
+    write_sha256sums(assets)
 
 
 def main(argv: list[str]) -> int:

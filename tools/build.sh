@@ -61,6 +61,37 @@ for pair in "agent-intercom-pi intercom" "pi-subagents subagents" "pi-muse-subsc
     if [[ "${PREPARE_LOCKS:-0}" == 1 ]]; then cp "$work/tars/$2.tgz" "$lockdir/tars/$2.tgz"; elif ! cmp -s "$work/tars/$2.tgz" "$lockdir/tars/$2.tgz"; then printf "local package $1 differs from locked build input\n" >&2; exit 2; fi
 done
 
+for companion in agent-intercom-claude agent-intercom-codex agent-intercom-opencode; do
+    companion_version=$(jaq -r '.version' "$work/packages/$companion/package.json")
+    companion_lock="$root/locks/companion-$companion"
+    mkdir -p "$companion_lock/tars"
+    if [[ "${PREPARE_LOCKS:-0}" == 1 ]]; then
+        cp "$work/packages/$companion/package.json" "$companion_lock/package.json"
+        (cd "$companion_lock" && rm -f package-lock.json && npm install --package-lock-only --ignore-scripts --no-audit --no-fund)
+    elif [[ ! -f "$companion_lock/package.json" || ! -f "$companion_lock/package-lock.json" || ! -f "$companion_lock/.npmrc" ]]; then
+        printf "missing companion lock %s; run make prepare explicitly\n" "$companion_lock" >&2
+        exit 2
+    fi
+    cp "$companion_lock/package.json" "$work/packages/$companion/package.json"
+    cp "$companion_lock/package-lock.json" "$work/packages/$companion/package-lock.json"
+    if [[ -f "$companion_lock/.npmrc" ]]; then cp "$companion_lock/.npmrc" "$work/packages/$companion/.npmrc"; fi
+    if [[ "$companion" == agent-intercom-opencode ]]; then
+        (export npm_config_allow_remote=all; cd "$work/packages/$companion" && npm ci --ignore-scripts --no-audit --no-fund)
+    else
+        (cd "$work/packages/$companion" && npm ci --ignore-scripts --no-audit --no-fund)
+    fi
+    (cd "$work/packages/$companion" && node scripts/build.mjs)
+    if [[ "$companion" == agent-intercom-opencode ]]; then
+        jaq '.bundleDependencies = ["@opencode-ai/plugin"]' "$work/packages/$companion/package.json" > "$work/opencode-package.json"
+        cp "$work/opencode-package.json" "$work/packages/$companion/package.json"
+    fi
+    packed=$(cd "$work/packages/$companion" && npm pack --silent --ignore-scripts --pack-destination "$work/raw")
+    "$PYTHON" -I "$root/tools/pack.py" "$work/raw/$packed" "$work/tars/$companion.tgz"
+    if [[ "${PREPARE_LOCKS:-0}" == 1 ]]; then cp "$work/tars/$companion.tgz" "$companion_lock/tars/$companion.tgz"; elif ! cmp -s "$work/tars/$companion.tgz" "$companion_lock/tars/$companion.tgz"; then printf "companion package %s differs from locked build input\n" "$companion" >&2; exit 2; fi
+    mkdir -p "$root/dist/$profile"
+    cp "$work/tars/$companion.tgz" "$root/dist/$profile/$companion-${companion_version}.tgz"
+done
+
 cat > "$work/runtime/package.json" <<JSON
 {
   "name": "usr-pi-offline-runtime",
@@ -108,6 +139,25 @@ revision=$(git -C "$root" rev-parse HEAD)
 mkdir -p "$work/archive-root"
 mv "$work/runtime/node_modules" "$work/archive-root/node_modules"
 "$PYTHON" -I "$root/tools/archive.py" archive "$work/archive-root" "$output" "$product" "$version" "$target" "$profile" "$revision" >/dev/null
+companions_json=$("$PYTHON" -I -c '
+import hashlib, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+profile = sys.argv[2]
+upstreams = json.loads((root / "sources/upstreams.json").read_text())
+names = ("agent-intercom-claude", "agent-intercom-codex", "agent-intercom-opencode")
+result = {}
+for name in names:
+    src = upstreams["sources"][name]
+    version = src["version"]
+    archive = f"{name}-{version}.tgz"
+    path = root / "dist" / profile / archive
+    data = path.read_bytes()
+    result[name] = {"archive": archive, "version": version,
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "bytes": len(data), "source_sha": src["sha"]}
+print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+' "$root" "$profile")
 provenance=$root/dist/$profile/provenance.json
 source_digest=$(shasum -a 256 "$root/sources/upstreams.json" | awk '{print $1}')
 patch_digest=$(shasum -a 256 "$root/patches/muse-offline-catalog.patch" | awk '{print $1}')
@@ -130,11 +180,11 @@ if [[ ! -f "$provenance" ]]; then
 fi
 tmp=$provenance.tmp
 jaq --arg revision "$revision" --arg product "$product" --arg version "$version" --arg source "$source_digest" --arg patch "$patch_digest" --arg target "$target" --arg profile "$profile" --arg archive "$(basename "$output")" --arg sha "$archive_sha" \
-    --arg lock "$lock_digest" --arg core "$core_lock_digest" --arg tools "$builder_tools_digest" --arg node "$node_version" --arg npm "$npm_version" --arg python "$python_version" --arg jaq "$jaq_version" --arg zlib "$zlib_version" --arg trust "$trust_patch_digest" --argjson bytes "$archive_bytes" \
-    '.builder_revision=$revision | .profile=$profile | .product=$product | .version=$version | .sources_sha256=$source | .components //= {pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed",muse_adapter:"source-snapshot-packed+patch"} | .components.pi_subagents=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.intercom_pi=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.muse_adapter=(if $profile == "headless-usr" then "source-snapshot-packed+patch+compiled" else "source-snapshot-packed+patch" end) | .components.pi_ai=(if $profile == "headless-usr" then "verified-precompiled-registry-package+bedrock-disabled" else "verified-precompiled-registry-package" end) | .targets[$target]={target:$target,profile:$profile,archive:$archive,sha256:$sha,bytes:$bytes} | .inputs[$target]={lock_sha256:$lock,core_build_lock_sha256:$core,builder_tools_sha256:$tools,patches:{muse_offline_catalog_sha256:$patch,muse_host_trust_sha256:$trust},toolchain:{node:$node,npm:$npm,python:$python,jaq:$jaq,zlib:$zlib}}' \
+    --arg lock "$lock_digest" --arg core "$core_lock_digest" --arg tools "$builder_tools_digest" --arg node "$node_version" --arg npm "$npm_version" --arg python "$python_version" --arg jaq "$jaq_version" --arg zlib "$zlib_version" --arg trust "$trust_patch_digest" --argjson bytes "$archive_bytes" --argjson companions "$companions_json" \
+    '.companions=$companions | .builder_revision=$revision | .profile=$profile | .product=$product | .version=$version | .sources_sha256=$source | .components //= {pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed",muse_adapter:"source-snapshot-packed+patch"} | .components.pi_subagents=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.intercom_pi=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.muse_adapter=(if $profile == "headless-usr" then "source-snapshot-packed+patch+compiled" else "source-snapshot-packed+patch" end) | .components.pi_ai=(if $profile == "headless-usr" then "verified-precompiled-registry-package+bedrock-disabled" else "verified-precompiled-registry-package" end) | .targets[$target]={target:$target,profile:$profile,archive:$archive,sha256:$sha,bytes:$bytes} | .inputs[$target]={lock_sha256:$lock,core_build_lock_sha256:$core,builder_tools_sha256:$tools,patches:{muse_offline_catalog_sha256:$patch,muse_host_trust_sha256:$trust},toolchain:{node:$node,npm:$npm,python:$python,jaq:$jaq,zlib:$zlib},companions:$companions}' \
     "$provenance" > "$tmp"
 mv "$tmp" "$provenance"
-(cd "$(dirname "$output")" && : > SHA256SUMS && for artifact in *.tar.xz; do
+(cd "$(dirname "$output")" && : > SHA256SUMS && for artifact in *.tar.xz *.tgz; do
     [[ -f "$artifact" ]] || continue
     shasum -a 256 "$artifact" >> SHA256SUMS
 done)

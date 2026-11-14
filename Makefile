@@ -27,6 +27,7 @@ verify:
 	$(NODE) "$(VERIFY_ROOT)/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" --version
 	TMPDIR="$(CURDIR)/.work/tmp" $(NODE) tools/verify.mjs "$(CURDIR)/$(VERIFY_ROOT)"
 	TMPDIR="$(CURDIR)/.work/tmp" $(NODE) tools/verify-providers.mjs "$(CURDIR)/$(VERIFY_ROOT)" "$(PROFILE)"
+	TMPDIR="$(CURDIR)/.work/tmp" $(NODE) tools/verify-companions.mjs "$(CURDIR)/dist/$(PROFILE)"
 
 repro: build
 	$(NODE) --version

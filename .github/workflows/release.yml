@@ -98,6 +98,7 @@ jobs:
             dist/${{ needs.preflight.outputs.profile }}/pi-${{ needs.preflight.outputs.profile }}-*-${{ matrix.target }}.tar.xz
             dist/${{ needs.preflight.outputs.profile }}/pi-${{ needs.preflight.outputs.profile }}-*-${{ matrix.target }}.manifest.json
             dist/${{ needs.preflight.outputs.profile }}/provenance.json
+            dist/${{ needs.preflight.outputs.profile }}/agent-intercom-*.tgz
           if-no-files-found: error
 
   musl:
@@ -212,7 +213,7 @@ jobs:
       - name: Merge provenance and checksums
         run: |
           mkdir -p .work/release
-          cp .work/dl/dist-*/pi-"$PROFILE"-*.tar.xz .work/dl/dist-*/pi-"$PROFILE"-*.manifest.json .work/release/
+          cp .work/dl/dist-*/pi-"$PROFILE"-*.tar.xz .work/dl/dist-*/pi-"$PROFILE"-*.manifest.json .work/dl/dist-*/agent-intercom-*.tgz .work/release/
           "$PYTHON" -I tools/release.py .work/release .work/dl/dist-*/provenance.json
           (cd .work/release && sha256sum -c SHA256SUMS)
       - name: Create release tag at triggering SHA

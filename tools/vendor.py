@@ -16,15 +16,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "sources/upstreams.json"
-EXCLUDE = re.compile(r"(\.test\.|^test/|^\.github/|package-lock\.json|\.png$|\.jpg$|\.webp$|\.gitignore$)")
+EXCLUDE = re.compile(r"(\.test\.|^test/|^\.github/|package-lock\.json|\.png$|\.jpg$|\.webp$|\.gitignore$|^dist/)")
 SUBAGENTS = re.compile(r"^(src/|agents/|docs/|skills/|prompts/|index\.ts$|.*\.mjs$|.*\.cjs$|package\.json$|LICENSE$|README\.md$)")
 OTHER = re.compile(r"^(src/|broker/|ui/|provider/|skills/|index\.ts$|.*\.ts$|.*\.mjs$|.*\.cjs$|package\.json$|LICENSE$|README\.md$|COPYRIGHT$|LICENSE_TRANSITION\.md$|THIRD_PARTY_NOTICES\.md$|tsconfig(?:\.build)?\.json$)")
+COMPANIONS = re.compile(r".*")
 SHA = re.compile(r"[0-9a-f]{40}")
-SUPPORTED = {"pi-subagents", "agent-intercom-pi", "agent-intercom-core", "pi-muse-subscription"}
+SUPPORTED = {"pi-subagents", "agent-intercom-pi", "agent-intercom-core", "pi-muse-subscription",
+             "agent-intercom-claude", "agent-intercom-codex", "agent-intercom-opencode"}
 
 
 def source_files(folder: Path, name: str) -> list[Path]:
-    pattern = SUBAGENTS if name == "pi-subagents" else OTHER
+    if name == "pi-subagents":
+        pattern = SUBAGENTS
+    elif name in {"agent-intercom-claude", "agent-intercom-codex", "agent-intercom-opencode"}:
+        pattern = COMPANIONS
+    else:
+        pattern = OTHER
     result = []
     for path in folder.rglob("*"):
         if path.is_symlink():
