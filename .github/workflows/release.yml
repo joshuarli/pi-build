@@ -213,7 +213,15 @@ jobs:
       - name: Merge provenance and checksums
         run: |
           mkdir -p .work/release
-          cp .work/dl/dist-*/pi-"$PROFILE"-*.tar.xz .work/dl/dist-*/pi-"$PROFILE"-*.manifest.json .work/dl/dist-*/agent-intercom-*.tgz .work/release/
+          cp .work/dl/dist-*/pi-"$PROFILE"-*.tar.xz .work/dl/dist-*/pi-"$PROFILE"-*.manifest.json .work/release/
+          for asset in .work/dl/dist-*/agent-intercom-*.tgz; do
+            name=$(basename "$asset")
+            if [ -e ".work/release/$name" ]; then
+              cmp -s "$asset" ".work/release/$name" || { printf 'companion archive differs across targets: %s\n' "$name" >&2; exit 1; }
+            else
+              cp "$asset" ".work/release/"
+            fi
+          done
           "$PYTHON" -I tools/release.py .work/release .work/dl/dist-*/provenance.json
           (cd .work/release && sha256sum -c SHA256SUMS)
       - name: Create release tag at triggering SHA
