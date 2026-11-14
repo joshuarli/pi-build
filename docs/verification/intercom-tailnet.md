@@ -7,10 +7,24 @@ connections for Pi, Claude Code, Codex and OpenCode coordinators. The canonical
 hub is the patched Pi broker. The `usr` launcher and deployment instructions are
 in [usr's tailnet guide](https://github.com/joshuarli/usr/blob/main/docs/intercom-tailnet.md).
 
-This change does not activate a listener on any machine. A native build and
-release, adoption of its actual asset digests in `usr`, and real two-host harness
-verification remain required. The previous `usr` release pin stays valid until
-that release exists. Do not invent a pin or replace installed files manually.
+Release `release-headless-usr-f6fc723` passed the native build, repro and musl
+gates on all three targets, and `usr` `a34fdcc` pins it with its companions.
+Two earlier releases were superseded:
+
+- `46c3702` moved the darwin job to `xcode-27`. The pinned Python has a
+  macOS 27 deployment floor, and its `os.pipe` segfaults on `macos-latest`
+  (macOS 26.7).
+- `f6fc723` fixed `tailnet-admin`. Its entry guard compared `import.meta.url`
+  with `argv[1]`, so through the installed `pi-runtime/current` symlink it
+  exited 0 without acting.
+
+Two-host acceptance used hub `lisa` (Alpine x86_64) and coordinator `mac`
+(macOS arm64). The repeatable usr qualifier
+(`tools/intercom-tailnet/qualify.py`) passed every check on three consecutive
+runs, driving interactive Pi coordinators on both hosts with no model calls.
+Its checks are listed in the usr guide. A manual Pi/Claude Code pair delivered
+in both directions. Pi/Codex and Pi/OpenCode pairs, and a real scoped bridge
+worker launched from an enrolled coordinator, remain unverified.
 
 ## Implemented contract
 

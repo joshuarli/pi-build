@@ -1,5 +1,5 @@
 Prefix: PIB
-Next: 6
+Next: 7
 
 # TODO
 
@@ -13,4 +13,15 @@ Headless does not mean text-only. Preserve docs, examples, licenses, images, ext
 - **Where:** `tools/archive.py`, `node_modules/@earendil-works/pi-tui/native/*/prebuilds`
 - **Problem:** Each archive includes `pi-tui` native prebuilds for other operating systems and architectures. The previously estimated saving is about 0.3 MB; it has not been remeasured for the reduced profile.
 - **Recommendation:** First prove that `pi-tui` selects the prebuild by an exact platform path. Then keep the matching prebuild only in `headless-usr`. Remeasure, rerun repeat-build and runtime checks on every target, and exercise both Linux targets under musl before accepting the removal.
+- **Fix with:** Remeasured archive sizes plus passing repeat-build, runtime and musl checks on all three targets with only the matching prebuild retained.
 - **Effort:** S
+
+### PIB-6 · P4 · Headless runtime warns about a missing pi-subagents CHANGELOG on startup
+
+- **Area:** Build
+- **Where:** `tools/headless.mjs`, `node_modules/pi-subagents` upgrade notice
+- **Problem:** Interactive Pi from release-headless-usr-f6fc723 prints `Failed to show the pi-subagents upgrade notice: ENOENT ... node_modules/pi-subagents/CHANGELOG.md` over the TUI on startup (observed on macOS arm64 2026-11-14); the archive omits the file the notice reads, and the error text corrupts the footer that UI automation reads.
+- **Recommendation:** Either ship pi-subagents' CHANGELOG.md in headless-usr or patch the notice to skip a missing changelog; add a verify.mjs check that the extracted runtime starts without that error.
+- **Fix with:** A headless extraction check that launches the TUI and asserts no upgrade-notice error
+- **Effort:** S
+
