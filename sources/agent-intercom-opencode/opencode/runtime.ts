@@ -19,7 +19,60 @@ export interface OpenCodeRuntimeIdentity {
 
 export interface PendingInboundMessage extends DurableInboundEntry {}
 
+export type ReplyWhich = "oldest" | "latest";
+
+function matchesPendingSender(entry: PendingInboundMessage, to: string): boolean {
+  return entry.from.id === to
+    || entry.from.name?.toLowerCase() === to.toLowerCase()
+    || entry.from.id.startsWith(to);
+}
+
+export function selectPendingAsk(entries: PendingInboundMessage[], to?: string, which?: ReplyWhich): PendingInboundMessage {
+  const sorted = [...entries].sort((a, b) => a.receivedAt - b.receivedAt);
+  if (sorted.length === 0) throw new Error("No matching pending ask. Call intercom_pending to inspect unresolved asks.");
+  const matches = to ? sorted.filter((entry) => matchesPendingSender(entry, to)) : sorted;
+  if (matches.length === 0) throw new Error(`No pending ask from "${to}".`);
+  if (matches.length === 1) return matches[0]!;
+  if (!to && new Set(matches.map((entry) => entry.from.id)).size > 1) {
+    throw new Error("Multiple pending asks — specify `to` using a sender from intercom_pending.");
+  }
+  if (!which) {
+    const sender = to ? ` from "${to}"` : "";
+    throw new Error(`Multiple pending asks${sender} — specify \`which\` as \`oldest\` or \`latest\`.`);
+  }
+  return which === "oldest" ? matches[0]! : matches[matches.length - 1]!;
+}
+
+function pendingSelector(entries: PendingInboundMessage[], entry: PendingInboundMessage): "oldest" | "latest" | "queued" | undefined {
+  const sameSender = entries.filter((candidate) => candidate.from.id === entry.from.id);
+  if (sameSender.length <= 1) return undefined;
+  const index = sameSender.findIndex((candidate) => candidate.message.id === entry.message.id);
+  if (index === 0) return "oldest";
+  if (index === sameSender.length - 1) return "latest";
+  return "queued";
+}
+
+function publicPendingEntry(entry: PendingInboundMessage, selector?: string): Record<string, unknown> {
+  return {
+    from: {
+      id: entry.from.id,
+      name: entry.from.name,
+      origin: entry.from.origin ?? "local",
+      ...(entry.from.remoteHostId ? { remote_host_id: entry.from.remoteHostId } : {}),
+      ...(entry.from.parentSessionId ? { parent_session_id: entry.from.parentSessionId } : {}),
+      ...(entry.from.generation ? { generation: entry.from.generation } : {}),
+    },
+    received_at: entry.receivedAt,
+    read: entry.read,
+    text: entry.message.content.text,
+    attachments: entry.message.content.attachments,
+    expects_reply: entry.message.expectsReply,
+    ...(selector ? { selector } : {}),
+  };
+}
+
 export type InboundMessageHandler = (entry: PendingInboundMessage) => void | Promise<void>;
+export type ConnectionStateHandler = (connected: boolean, error?: Error) => void;
 
 export interface ToolResult {
   content: Array<{ type: "text"; text: string }>;
@@ -88,6 +141,11 @@ export function resolveSessionTarget(sessions: SessionInfo[], nameOrId: string):
   return null;
 }
 
+export function formatSessionDisplay(session: SessionInfo): string {
+  const name = session.name || session.id;
+  return session.origin === "remote" ? `${name} [remote:${session.remoteHostId || "unknown-host"}]` : name;
+}
+
 export function formatSessionList(sessions: SessionInfo[], currentSessionId: string | null, currentCwd: string): string {
   if (!sessions.length) return "No intercom sessions connected.";
   return sessions.map((session) => {
@@ -97,7 +155,7 @@ export function formatSessionList(sessions: SessionInfo[], currentSessionId: str
       session.status,
     ].filter((tag): tag is string => Boolean(tag));
     const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
-    return `- ${session.name || "unnamed"} (${session.id.slice(0, 8)}) - ${session.cwd} (${session.model})${suffix}`;
+    return `- ${formatSessionDisplay(session)} (${session.id.slice(0, 8)}) - ${session.cwd} (${session.model})${suffix}`;
   }).join("\n");
 }
 
@@ -119,18 +177,42 @@ function textResult(text: string, structuredContent?: Record<string, unknown>, i
   };
 }
 
+export interface OpenCodeIntercomRuntimeOptions {
+  clientFactory?: () => IntercomClient;
+  prepareConnection?: () => Promise<void>;
+  reconnectDelays?: number[];
+  onInboundActivity?: (from: SessionInfo, message: Message) => void | Promise<void>;
+}
+
 export class OpenCodeIntercomRuntime {
   private client: IntercomClient | null = null;
+  private connectPromise: Promise<IntercomClient> | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempt = 0;
+  private reconnectEnabled = true;
   private identity: OpenCodeRuntimeIdentity;
   private unread: PendingInboundMessage[] = [];
   private unresolvedAsks = new Map<string, PendingInboundMessage>();
   private replyWaiters = new Map<string, ReplyWaiter>();
   private onInboundMessage?: InboundMessageHandler;
+  private onConnectionState?: ConnectionStateHandler;
   private inboundStore: InboundDeliveryStore;
+  private readonly clientFactory: () => IntercomClient;
+  private readonly prepareConnection: () => Promise<void>;
+  private readonly reconnectDelays: number[];
+  private readonly onInboundActivity?: (from: SessionInfo, message: Message) => void | Promise<void>;
 
-  constructor(identity?: OpenCodeRuntimeIdentity, cwd?: string, onInboundMessage?: InboundMessageHandler, inboundStore?: InboundDeliveryStore) {
+  constructor(identity?: OpenCodeRuntimeIdentity, cwd?: string, onInboundMessage?: InboundMessageHandler, inboundStore?: InboundDeliveryStore, options: OpenCodeIntercomRuntimeOptions = {}) {
     this.identity = identity ?? buildOpenCodeRuntimeIdentity(process.env, cwd);
     this.onInboundMessage = onInboundMessage;
+    this.clientFactory = options.clientFactory ?? (() => new IntercomClient());
+    this.prepareConnection = options.prepareConnection ?? (async () => {
+      const config = loadConfig();
+      if (!config.enabled) throw new Error("Intercom disabled");
+      await spawnBrokerIfNeeded(config.brokerCommand, config.brokerArgs);
+    });
+    this.reconnectDelays = options.reconnectDelays?.length ? options.reconnectDelays : [250, 500, 1000, 2000, 5000];
+    this.onInboundActivity = options.onInboundActivity;
     this.inboundStore = inboundStore ?? new DurableInboundStore(
       process.env.OPENCODE_INTERCOM_INBOUND_STATE?.trim() || getOpenCodeInboundStatePath(this.identity.sessionId),
     );
@@ -142,12 +224,26 @@ export class OpenCodeIntercomRuntime {
     return this.identity;
   }
 
+  setConnectionStateHandler(handler: ConnectionStateHandler): void {
+    this.onConnectionState = handler;
+  }
+
   async connect(): Promise<IntercomClient> {
+    this.reconnectEnabled = true;
+    this.clearReconnectTimer();
     if (this.client?.isConnected()) return this.client;
-    const config = loadConfig();
-    if (!config.enabled) throw new Error("Intercom disabled");
-    await spawnBrokerIfNeeded(config.brokerCommand, config.brokerArgs);
-    const client = new IntercomClient();
+    if (this.connectPromise) return this.connectPromise;
+    this.connectPromise = this.connectOnce();
+    try {
+      return await this.connectPromise;
+    } finally {
+      this.connectPromise = null;
+    }
+  }
+
+  private async connectOnce(): Promise<IntercomClient> {
+    await this.prepareConnection();
+    const client = this.clientFactory();
     client.on("message", (from: SessionInfo, message: Message, deliveryId: string) => {
       this.handleIncomingMessage(from, message, deliveryId);
     });
@@ -159,6 +255,8 @@ export class OpenCodeIntercomRuntime {
       }
       this.replyWaiters.clear();
       if (this.client === client) this.client = null;
+      this.onConnectionState?.(false, error);
+      this.scheduleReconnect();
     });
     await client.connect({
       name: this.identity.name,
@@ -170,6 +268,8 @@ export class OpenCodeIntercomRuntime {
       status: "idle",
     }, this.identity.sessionId);
     this.client = client;
+    this.reconnectAttempt = 0;
+    this.onConnectionState?.(true);
     for (const entry of this.inboundStore.pendingInjection()) {
       void Promise.resolve(this.onInboundMessage?.(entry)).catch((error) => {
         console.error("Failed to replay durable inbound intercom message:", error);
@@ -178,10 +278,44 @@ export class OpenCodeIntercomRuntime {
     return client;
   }
 
+  private scheduleReconnect(): void {
+    if (!this.reconnectEnabled || this.reconnectTimer) return;
+    const delay = this.reconnectDelays[Math.min(this.reconnectAttempt, this.reconnectDelays.length - 1)]!;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect().then((client) => {
+        if (!client.isConnected()) {
+          this.reconnectAttempt += 1;
+          this.scheduleReconnect();
+        }
+      }).catch((error) => {
+        this.reconnectAttempt += 1;
+        this.onConnectionState?.(false, error instanceof Error ? error : new Error(String(error)));
+        this.scheduleReconnect();
+      });
+    }, delay);
+    this.reconnectTimer.unref?.();
+  }
+
+  private clearReconnectTimer(): void {
+    if (!this.reconnectTimer) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
   async disconnect(): Promise<void> {
-    if (!this.client) return;
-    await this.client.disconnect();
+    this.reconnectEnabled = false;
+    this.clearReconnectTimer();
+    if (this.connectPromise) {
+      try {
+        await this.connectPromise;
+      } catch {
+        // A failed in-progress connection is already closed.
+      }
+    }
+    const client = this.client;
     this.client = null;
+    if (client) await client.disconnect();
   }
 
   private handleIncomingMessage(from: SessionInfo, message: Message, deliveryId: string): void {
@@ -190,6 +324,7 @@ export class OpenCodeIntercomRuntime {
       const senderTarget = from.name || from.id;
       const fromMatches = senderTarget.toLowerCase() === waiter.from.toLowerCase() || from.id === waiter.from;
       if (fromMatches) {
+        void Promise.resolve(this.onInboundActivity?.(from, message)).catch(() => undefined);
         this.replyWaiters.delete(waiter.replyTo);
         clearTimeout(waiter.timeout);
         waiter.cleanup?.();
@@ -205,6 +340,7 @@ export class OpenCodeIntercomRuntime {
       this.client?.acknowledgeMessage(deliveryId);
       return;
     }
+    void Promise.resolve(this.onInboundActivity?.(from, message)).catch(() => undefined);
     this.unread.push(entry);
     if (message.expectsReply) {
       this.unresolvedAsks.set(message.id, entry);
@@ -364,37 +500,30 @@ export class OpenCodeIntercomRuntime {
     if (markRead) {
       for (const entry of unreadMessages) entry.read = true;
     }
-    const pendingAsks = Array.from(this.unresolvedAsks.values());
+    const pendingAsks = Array.from(this.unresolvedAsks.values()).sort((a, b) => a.receivedAt - b.receivedAt);
     const lines = [
       unreadMessages.length
-        ? unreadMessages.map((entry) => `- ${entry.from.name || entry.from.id}: ${entry.message.content.text}${formatAttachments(entry.message.content.attachments)}`).join("\n")
+        ? unreadMessages.map((entry) => `- ${formatSessionDisplay(entry.from)}: ${entry.message.content.text}${formatAttachments(entry.message.content.attachments)}`).join("\n")
         : "No unread messages.",
       pendingAsks.length
-        ? `\nPending asks:\n${pendingAsks.map((entry) => `- ${entry.message.id} from ${entry.from.name || entry.from.id}: ${entry.message.content.text}`).join("\n")}`
+        ? `\nPending asks:\n${pendingAsks.map((entry) => {
+          const selector = pendingSelector(pendingAsks, entry);
+          return `- ${formatSessionDisplay(entry.from)}${selector ? ` [${selector}]` : ""}: ${entry.message.content.text}`;
+        }).join("\n")}`
         : "",
     ].filter(Boolean);
-    return textResult(lines.join("\n"), { unread_messages: unreadMessages, pending_asks: pendingAsks });
+    return textResult(lines.join("\n"), {
+      unread_messages: unreadMessages.map((entry) => publicPendingEntry(entry)),
+      pending_asks: pendingAsks.map((entry) => publicPendingEntry(entry, pendingSelector(pendingAsks, entry))),
+    });
   }
 
-  async reply(message: string, to?: string, replyTo?: string): Promise<ToolResult> {
-    let target: PendingInboundMessage | undefined;
-    if (replyTo) {
-      target = this.unresolvedAsks.get(replyTo);
-    } else if (to) {
-      const lowerTo = to.toLowerCase();
-      const matches = Array.from(this.unresolvedAsks.values()).filter((entry) =>
-        entry.from.id === to || entry.from.name?.toLowerCase() === lowerTo || entry.from.id.startsWith(to)
-      );
-      if (matches.length > 1) {
-        return textResult(`Multiple pending asks match "${to}". Call intercom_pending and reply with reply_to.`, { ok: false }, true);
-      }
-      target = matches[0];
-    } else if (this.unresolvedAsks.size === 1) {
-      target = Array.from(this.unresolvedAsks.values())[0];
-    }
-
-    if (!target) {
-      return textResult("No matching pending ask. Call intercom_pending to inspect unresolved asks.", { ok: false }, true);
+  async reply(message: string, to?: string, which?: ReplyWhich): Promise<ToolResult> {
+    let target: PendingInboundMessage;
+    try {
+      target = selectPendingAsk(Array.from(this.unresolvedAsks.values()), to, which);
+    } catch (error) {
+      return textResult(error instanceof Error ? error.message : String(error), { ok: false }, true);
     }
 
     const result = await this.send(target.from.id, message, undefined, target.message.id);

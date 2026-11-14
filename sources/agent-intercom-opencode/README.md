@@ -71,6 +71,21 @@ cd ~/.config/opencode
 npm install @dataforxyz/agent-intercom-opencode
 ```
 
+For OpenCode v2, add the native v2 entrypoint to `opencode.json`:
+
+```json
+{
+  "plugins": ["@dataforxyz/agent-intercom-opencode/v2"]
+}
+```
+
+The v2 entrypoint uses the v2 tool, session, permission, and event APIs directly.
+It filters the public event stream by the plugin location before updating the
+active session, preventing one directory's messages from being routed into a
+different OpenCode pane.
+
+For OpenCode v1, continue with the server and TUI configuration below.
+
 The packaged `dist` files are prebuilt. Add the server plugin to your normal OpenCode config (usually `~/.config/opencode/opencode.json`), replacing `/home/you` with your absolute home path:
 
 ```json
@@ -167,8 +182,12 @@ uses `wl-copy`, `xclip`, or `xsel`; macOS uses `pbcopy`, and Windows uses
 - `intercom_send`: send a non-blocking message
 - `intercom_ask`: send a question and wait briefly for the target's reply
 - `intercom_pending`: read queued inbound messages and unresolved asks
-- `intercom_reply`: reply to a pending inbound ask
-- `agent_fleet` *(opt-in manager only)*: create, inspect, adopt, renew, stop, and clean up owned coworkers; inspect coordinated adapter versions and preview or execute source-aware updates using the same implementation as Pi
+- `intercom_reply`: reply to a pending inbound ask; use `to` plus `which: "oldest" | "latest"` if one sender has multiple unresolved asks
+
+Pending output never exposes protocol message IDs. Keep at most one unresolved `intercom_ask` to the same recipient; the broker rejects a second ask and recommends `intercom_send` for a non-blocking follow-up. Use `intercom_send`—not `intercom_ask`—for assignments and progress/status checkpoints.
+
+The OpenCode runtime automatically reconnects its stable Intercom identity after a broker restart and reports the temporary reconnecting state through peer health metadata.
+- `agent_fleet` *(opt-in manager only)*: create, inspect, adopt, renew, stop, and clean up owned coworkers; inspect coordinated adapter versions and preview or execute source-aware updates using the same implementation as Pi. Manager-received messages from an owned worker automatically renew that exact worker's activity-bounded lease. Deleting a stopped record with `forget` requires `acknowledge: true`.
 
 ## Inbound Delivery Model
 

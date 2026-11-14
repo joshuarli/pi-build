@@ -1,8 +1,20 @@
 import { EventEmitter } from "events";
 import net from "net";
 import { randomUUID } from "crypto";
+import { types as nodeUtilTypes } from "node:util";
+import {
+  POLICY_SEMANTICS_HASH,
+  POLICY_SEMANTICS_VERSION,
+} from "@dataforxyz/agent-intercom-core";
+import {
+  parseBossControlEnvelope,
+  type BossControlEnvelope,
+} from "@dataforxyz/agent-intercom-core/boss";
+import { assertExactKeys } from "@dataforxyz/agent-intercom-core/canonical";
+import { parseBossSessionMetadata, parseBoundBossControl } from "./boss.ts";
 import { writeMessage, createMessageReader } from "./framing.ts";
 import { PersistentOutboundOutbox } from "../outbound-outbox.ts";
+import { loadRemoteAccessCredential, writeRemoteSessionCredential, type LoadedRemoteAccessCredential } from "./access-credential.ts";
 import {
   getBrokerConnectTarget,
   INTERCOM_PROTOCOL_NAME,
@@ -99,6 +111,39 @@ function isMessage(value: unknown): value is Message {
     || (Array.isArray(content.attachments) && content.attachments.every(isAttachment));
 }
 
+const PRE_ACCEPT_BOSS_CONTROL_FAILURE_CODES: readonly DeliveryFailureCode[] = [
+  "INVALID_BOSS_CONTROL",
+  "SESSION_NOT_FOUND",
+  "CONFLICTING_MESSAGE_ID",
+  "TOO_MANY_PENDING_DELIVERIES",
+  "BOSS_CONTROL_DENIED",
+];
+
+const POST_ACCEPT_BOSS_CONTROL_FAILURE_CODES: readonly DeliveryFailureCode[] = [
+  "BOSS_CONTROL_DENIED",
+  "RECIPIENT_DISCONNECTED",
+  "SENDER_DISCONNECTED",
+  "DELIVERY_TIMEOUT",
+];
+
+function isBossControlFailureCode(value: unknown, accepted: boolean): value is DeliveryFailureCode {
+  return typeof value === "string" && (
+    accepted ? POST_ACCEPT_BOSS_CONTROL_FAILURE_CODES : PRE_ACCEPT_BOSS_CONTROL_FAILURE_CODES
+  ).includes(value as DeliveryFailureCode);
+}
+
+function exactBossControlFrame(
+  frame: Record<string, unknown>,
+  required: string[],
+  path: string,
+): void {
+  assertExactKeys(frame, required, [], path);
+}
+
+function bossControlFrameString(value: unknown, path: string): asserts value is string {
+  if (typeof value !== "string" || value.length === 0) throw new Error(`${path} must be a non-empty string`);
+}
+
 function isSessionInfo(value: unknown): value is SessionInfo {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -129,7 +174,166 @@ function isSessionInfo(value: unknown): value is SessionInfo {
     return false;
   }
 
-  return session.trustedLocal === undefined || typeof session.trustedLocal === "boolean";
+  if (session.trustedLocal !== undefined && typeof session.trustedLocal !== "boolean") return false;
+  if (session.origin !== undefined && session.origin !== "local" && session.origin !== "remote") return false;
+  if (session.remoteHostId !== undefined && typeof session.remoteHostId !== "string") return false;
+  if (session.parentSessionId !== undefined && typeof session.parentSessionId !== "string") return false;
+  if (session.rootSessionId !== undefined && typeof session.rootSessionId !== "string") return false;
+  if (session.generation !== undefined && (typeof session.generation !== "number" || !Number.isSafeInteger(session.generation))) return false;
+  if (session.canDelegate !== undefined && typeof session.canDelegate !== "boolean") return false;
+  for (const field of ["depth", "maxDepth", "maxChildren"] as const) {
+    if (session[field] !== undefined && (typeof session[field] !== "number" || !Number.isSafeInteger(session[field]))) return false;
+  }
+  return session.boss === undefined;
+}
+
+const BOSS_SESSION_REQUIRED_FIELDS = [
+  "id",
+  "cwd",
+  "model",
+  "pid",
+  "startedAt",
+  "lastActivity",
+  "boss",
+] as const;
+
+const BOSS_SESSION_OPTIONAL_FIELDS = [
+  "name",
+  "status",
+  "peerUid",
+  "trustedLocal",
+  "origin",
+  "remoteHostId",
+  "parentSessionId",
+  "rootSessionId",
+  "generation",
+  "canDelegate",
+  "depth",
+  "maxDepth",
+  "maxChildren",
+] as const;
+
+/**
+ * Snapshot broker-owned data without invoking source accessors or proxy traps.
+ * The resulting tree has only plain records and dense arrays, so the Core and
+ * broker parsers can safely enforce their exact semantic shapes afterwards.
+ */
+function snapshotBossData(
+  value: unknown,
+  path: string,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0,
+): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || Object.is(value, -0)) throw new Error(`${path} must be a JSON number`);
+    return value;
+  }
+  if (typeof value !== "object" || nodeUtilTypes.isProxy(value)) {
+    throw new Error(`${path} must be unproxied broker-owned data`);
+  }
+  if (depth >= 32 || seen.has(value)) throw new Error(`${path} must be an acyclic bounded data tree`);
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) throw new Error(`${path} must be a plain array`);
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+    if (
+      lengthDescriptor === undefined
+      || !Object.hasOwn(lengthDescriptor, "value")
+      || !Number.isSafeInteger(lengthDescriptor.value)
+      || lengthDescriptor.value < 0
+    ) {
+      throw new Error(`${path} must be a dense array`);
+    }
+    const entries = new Map<number, unknown>();
+    for (const key of Reflect.ownKeys(value)) {
+      if (key === "length") continue;
+      if (typeof key !== "string") throw new Error(`${path} must not contain symbol properties`);
+      const index = Number(key);
+      if (
+        !Number.isInteger(index)
+        || index < 0
+        || index >= lengthDescriptor.value
+        || String(index) !== key
+      ) {
+        throw new Error(`${path}.${key} is not a supported array index`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !descriptor.enumerable || !Object.hasOwn(descriptor, "value")) {
+        throw new Error(`${path}[${index}] must be an enumerable data property`);
+      }
+      entries.set(index, snapshotBossData(descriptor.value, `${path}[${index}]`, seen, depth + 1));
+    }
+    if (entries.size !== lengthDescriptor.value) throw new Error(`${path} must not contain sparse array holes`);
+    return Array.from({ length: lengthDescriptor.value }, (_, index) => entries.get(index));
+  }
+
+  if (Object.getPrototypeOf(value) !== Object.prototype) throw new Error(`${path} must be a plain object`);
+  const snapshot: Record<string, unknown> = {};
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") throw new Error(`${path} must not contain symbol properties`);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable || !Object.hasOwn(descriptor, "value")) {
+      throw new Error(`${path}.${key} must be an enumerable data property`);
+    }
+    Object.defineProperty(snapshot, key, {
+      configurable: true,
+      enumerable: true,
+      value: snapshotBossData(descriptor.value, `${path}.${key}`, seen, depth + 1),
+      writable: true,
+    });
+  }
+  return snapshot;
+}
+
+function authoritativeBossSessionInfo(value: unknown): SessionInfo | undefined {
+  try {
+    const snapshot = snapshotBossData(value, "$.boss_control.from");
+    if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot)) return undefined;
+    const session = snapshot as Record<string, unknown>;
+    assertExactKeys(
+      session,
+      [...BOSS_SESSION_REQUIRED_FIELDS],
+      [...BOSS_SESSION_OPTIONAL_FIELDS],
+      "$.boss_control.from",
+    );
+
+    const { boss, ...ordinaryFields } = session;
+    if (!isSessionInfo(ordinaryFields)) return undefined;
+    const parsedBoss = parseBossSessionMetadata(boss, ordinaryFields.id);
+    if (
+      parsedBoss.registration.state !== "active"
+      || !parsedBoss.registration.brokerIdentityVerified
+      || parsedBoss.principal.state !== "active"
+      || (parsedBoss.binding !== undefined && parsedBoss.binding.state !== "active")
+    ) {
+      return undefined;
+    }
+    return { ...ordinaryFields, boss: parsedBoss };
+  } catch {
+    return undefined;
+  }
+}
+
+function isRemoteAccessMetadata(value: unknown): value is import("../types.ts").RemoteAccessMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const access = value as Record<string, unknown>;
+  return access.origin === "remote"
+    && typeof access.remoteHostId === "string"
+    && typeof access.parentSessionId === "string"
+    && typeof access.rootSessionId === "string"
+    && typeof access.generation === "number"
+    && Number.isSafeInteger(access.generation)
+    && access.generation > 0
+    && typeof access.canDelegate === "boolean"
+    && typeof access.depth === "number"
+    && Number.isSafeInteger(access.depth)
+    && typeof access.maxDepth === "number"
+    && Number.isSafeInteger(access.maxDepth)
+    && typeof access.maxChildren === "number"
+    && Number.isSafeInteger(access.maxChildren)
+    && (access.sessionCredential === undefined || typeof access.sessionCredential === "string");
 }
 
 export class IntercomClient extends EventEmitter {
@@ -143,7 +347,14 @@ export class IntercomClient extends EventEmitter {
   }>();
   private pendingLists = new Map<string, { resolve: (sessions: SessionInfo[]) => void; reject: (e: Error) => void }>();
   private pendingAskControls = new Map<string, { resolve: (applied: boolean) => void; timeout: NodeJS.Timeout }>();
+  private pendingBossControls = new Map<string, {
+    accepted: boolean;
+    deliveryId?: string;
+    resolve: (result: SendResult) => void;
+    reject: (error: Error) => void;
+  }>();
   private outbox: PersistentOutboundOutbox | null = null;
+  private remoteAccessCredential: LoadedRemoteAccessCredential | undefined;
   private disconnecting = false;
   private disconnectError: Error | null = null;
 
@@ -161,6 +372,8 @@ export class IntercomClient extends EventEmitter {
       pending.resolve(false);
     }
     this.pendingAskControls.clear();
+    for (const pending of this.pendingBossControls.values()) pending.reject(error);
+    this.pendingBossControls.clear();
   }
 
   get sessionId(): string | null {
@@ -203,6 +416,7 @@ export class IntercomClient extends EventEmitter {
       let target: BrokerConnectTarget;
       try {
         target = getBrokerConnectTarget();
+        this.remoteAccessCredential = loadRemoteAccessCredential();
         socket = connectToBrokerTarget(target);
       } catch (error) {
         reject(toError(error));
@@ -311,7 +525,8 @@ export class IntercomClient extends EventEmitter {
           protocol: INTERCOM_PROTOCOL_NAME,
           version: INTERCOM_PROTOCOL_VERSION,
           session,
-          ...(sessionId ? { sessionId } : {}),
+          ...(!this.remoteAccessCredential && sessionId ? { sessionId } : {}),
+          ...(this.remoteAccessCredential ? { access: this.remoteAccessCredential.access } : {}),
           ...(typeof target === "string" ? {} : { stateId: target.stateId }),
         });
       } catch (error) {
@@ -347,8 +562,38 @@ export class IntercomClient extends EventEmitter {
           throw new Error("Invalid registered message");
         }
 
+        if (brokerMessage.boss !== undefined || brokerMessage.capabilities !== undefined) {
+          throw new Error("Ordinary registration must not contain feature or Boss metadata");
+        }
+
         if (this._sessionId !== null) {
           throw new Error("Received duplicate registered message");
+        }
+
+        if (this.remoteAccessCredential) {
+          const contract = brokerMessage.remoteAccess;
+          const contractFields = typeof contract === "object" && contract !== null
+            ? contract as Record<string, unknown>
+            : undefined;
+          if (
+            !contractFields
+            || contractFields.feature !== "remote-access-v1"
+            || contractFields.policySemanticsVersion !== POLICY_SEMANTICS_VERSION
+            || contractFields.policySemanticsHash !== POLICY_SEMANTICS_HASH
+          ) {
+            throw new Error("Remote Intercom policy contract is absent or incompatible");
+          }
+          if (!isRemoteAccessMetadata(brokerMessage.access)) {
+            throw new Error("Remote Intercom registration omitted broker-owned provenance");
+          }
+          if (this.remoteAccessCredential.enrollment) {
+            writeRemoteSessionCredential(this.remoteAccessCredential.path, brokerMessage.sessionId, brokerMessage.access);
+          } else {
+            const reconnect = this.remoteAccessCredential.access;
+            if (!("sessionId" in reconnect) || reconnect.sessionId !== brokerMessage.sessionId || reconnect.generation !== brokerMessage.access.generation) {
+              throw new Error("Remote Intercom reconnect identity or generation changed unexpectedly");
+            }
+          }
         }
 
         this._sessionId = brokerMessage.sessionId;
@@ -382,6 +627,85 @@ export class IntercomClient extends EventEmitter {
         }
 
         this.emit("message", from, message, deliveryId);
+        break;
+      }
+
+      case "boss_control": {
+        const { deliveryId, envelope } = brokerMessage;
+        const from = authoritativeBossSessionInfo(brokerMessage.from);
+        if (typeof deliveryId !== "string" || from === undefined) throw new Error("Invalid boss_control event");
+        const parsed = parseBoundBossControl(
+          snapshotBossData(envelope, "$.boss_control.envelope"),
+          from,
+        );
+        this.emit("boss_control", from, parsed, deliveryId);
+        break;
+      }
+
+      case "boss_control_accepted": {
+        exactBossControlFrame(brokerMessage, ["type", "messageId", "deliveryId"], "$.boss_control_accepted");
+        const { deliveryId, messageId } = brokerMessage;
+        bossControlFrameString(deliveryId, "$.boss_control_accepted.deliveryId");
+        bossControlFrameString(messageId, "$.boss_control_accepted.messageId");
+        const pending = this.pendingBossControls.get(messageId);
+        if (!pending) break;
+        if (pending.accepted) throw new Error("Duplicate Boss control acceptance");
+        if (pending.deliveryId !== undefined) throw new Error("Boss control acceptance state is contradictory");
+        pending.accepted = true;
+        pending.deliveryId = deliveryId as string;
+        break;
+      }
+
+      case "boss_control_delivered": {
+        exactBossControlFrame(brokerMessage, ["type", "messageId", "deliveryId"], "$.boss_control_delivered");
+        const { deliveryId, messageId } = brokerMessage;
+        bossControlFrameString(deliveryId, "$.boss_control_delivered.deliveryId");
+        bossControlFrameString(messageId, "$.boss_control_delivered.messageId");
+        const pending = this.pendingBossControls.get(messageId);
+        if (!pending) break;
+        if (!pending.accepted || pending.deliveryId !== deliveryId) {
+          throw new Error("Boss control delivery did not follow matching acceptance");
+        }
+        this.pendingBossControls.delete(messageId);
+        pending.resolve({ id: messageId, accepted: true, delivered: true, deliveryId });
+        break;
+      }
+
+      case "boss_control_failed": {
+        const { accepted } = brokerMessage;
+        if (typeof accepted !== "boolean") throw new Error("Invalid boss_control_failed message");
+        exactBossControlFrame(
+          brokerMessage,
+          accepted
+            ? ["type", "messageId", "deliveryId", "accepted", "code", "reason"]
+            : ["type", "messageId", "accepted", "code", "reason"],
+          "$.boss_control_failed",
+        );
+        const { code, deliveryId, messageId, reason } = brokerMessage;
+        if (
+          !isBossControlFailureCode(code, accepted)
+          || typeof reason !== "string"
+          || reason.length === 0
+        ) {
+          throw new Error("Invalid boss_control_failed message");
+        }
+        bossControlFrameString(messageId, "$.boss_control_failed.messageId");
+        if (accepted) bossControlFrameString(deliveryId, "$.boss_control_failed.deliveryId");
+        const pending = this.pendingBossControls.get(messageId);
+        if (!pending) break;
+        if (accepted !== pending.accepted) throw new Error("Boss control failure acceptance state is inconsistent");
+        if (accepted && pending.deliveryId !== deliveryId) {
+          throw new Error("Boss control failure did not follow matching acceptance");
+        }
+        this.pendingBossControls.delete(messageId);
+        pending.resolve({
+          id: messageId,
+          accepted,
+          delivered: false,
+          code,
+          reason,
+          ...(accepted ? { deliveryId: deliveryId as string } : {}),
+        });
         break;
       }
 
@@ -678,8 +1002,57 @@ export class IntercomClient extends EventEmitter {
     });
   }
 
+  sendBossControl(to: string, envelopeValue: BossControlEnvelope): Promise<SendResult> {
+    let socket: net.Socket;
+    try {
+      socket = this.requireActiveSocket();
+    } catch (error) {
+      return Promise.reject(toError(error));
+    }
+    let envelope: BossControlEnvelope;
+    try {
+      envelope = parseBossControlEnvelope(envelopeValue);
+    } catch (error) {
+      return Promise.reject(toError(error));
+    }
+    if (this.pendingBossControls.has(envelope.messageId)) {
+      return Promise.resolve({
+        id: envelope.messageId,
+        accepted: false,
+        delivered: false,
+        code: "CONFLICTING_MESSAGE_ID",
+        reason: `Boss control message ID ${envelope.messageId} is already pending`,
+      });
+    }
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (!this.pendingBossControls.delete(envelope.messageId)) return;
+        reject(new Error("Boss control send timeout"));
+      }, 10000);
+      const wrappedResolve = (result: SendResult) => {
+        clearTimeout(timeout);
+        resolve(result);
+      };
+      const wrappedReject = (error: Error) => {
+        clearTimeout(timeout);
+        reject(error);
+      };
+      this.pendingBossControls.set(envelope.messageId, { accepted: false, resolve: wrappedResolve, reject: wrappedReject });
+      try {
+        writeMessage(socket, { type: "boss_control_send", to, envelope });
+      } catch (error) {
+        this.pendingBossControls.delete(envelope.messageId);
+        wrappedReject(toError(error));
+      }
+    });
+  }
+
   acknowledgeMessage(deliveryId: string): boolean {
     return this.writeControlMessage({ type: "message_received", deliveryId });
+  }
+
+  acknowledgeBossControl(deliveryId: string): boolean {
+    return this.writeControlMessage({ type: "boss_control_received", deliveryId });
   }
 
   rejectMessage(deliveryId: string, reason: string): boolean {

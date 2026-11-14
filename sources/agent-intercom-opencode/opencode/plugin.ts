@@ -1,10 +1,14 @@
 import { appendFileSync } from "fs";
 import { tool, type Plugin } from "@opencode-ai/plugin";
-import { OpenCodeIntercomRuntime, formatAttachments, type PendingInboundMessage } from "./runtime.ts";
+import { OpenCodeIntercomRuntime, formatAttachments, formatSessionDisplay, type PendingInboundMessage } from "./runtime.ts";
 import { normalizeOpenCodeSessionStatus, OpenCodePeerHealthReporter } from "./health.ts";
 import { invokeAgentFleet, isFleetManagementEnabled } from "./fleet.ts";
 import { startOpenCodeControlServer } from "./control.ts";
 import { validateAskTimeoutMs } from "../config.ts";
+
+// OpenCode v1 treats every export from a configured server-plugin module as
+// a plugin factory. Keep this module default-only; package consumers import
+// the public contract from dist/index.mjs instead.
 
 const INJECT_LOG_PATH = "/tmp/intercom-inject.log";
 
@@ -26,7 +30,7 @@ function listScope(value: string | undefined): "machine" | "directory" | "repo" 
   throw new Error('scope must be one of "machine", "directory", or "repo"');
 }
 
-export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, serverUrl }) => {
+const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, serverUrl }) => {
   let activeSessionID = process.env.OPENCODE_INTERCOM_TARGET_SESSION?.trim() || process.env.OPENCODE_SESSION_ID?.trim() || undefined;
   let activeSessionStatus = "idle";
   const knownSessionIDs = new Set<string>();
@@ -37,6 +41,9 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
   let healthReporter: OpenCodePeerHealthReporter;
   const canUseTuiInjection = Boolean(process.stdin.isTTY || process.stdout.isTTY);
   const debugInject = process.env.OPENCODE_INTERCOM_DEBUG === "1";
+  const fleetManagementEnabled = isFleetManagementEnabled();
+  let fleetHeartbeatRunning = false;
+  let fleetHeartbeat: NodeJS.Timeout | undefined;
 
   function logInject(step: string, details: Record<string, unknown>): void {
     if (!debugInject) {
@@ -101,9 +108,9 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
   }
 
   function formatInboundPrompt(entry: PendingInboundMessage): string {
-    const from = entry.from.name || entry.from.id;
+    const from = formatSessionDisplay(entry.from);
     const replyHint = entry.message.expectsReply
-      ? `\n\nThis message expects a reply. Use intercom_reply with reply_to "${entry.message.id}" after you respond.`
+      ? "\n\nThis message expects a reply. Use intercom_reply with only your reply text while this turn is active. If you reply later, use intercom_pending plus the sender and oldest/latest selector."
       : "";
     return [
       `Incoming intercom message from ${from} (${entry.from.model}, ${entry.from.cwd}):`,
@@ -249,7 +256,7 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
   }
 
   async function injectInbound(entry: PendingInboundMessage): Promise<void> {
-    const from = entry.from.name || entry.from.id;
+    const from = formatSessionDisplay(entry.from);
     const prompt = formatInboundPrompt(entry);
     if (deliveredMessageIDs.has(entry.message.id)) {
       logInject("inject.skip_delivered", { messageID: entry.message.id });
@@ -357,7 +364,15 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
     }
   }
 
-  runtime = new OpenCodeIntercomRuntime(undefined, directory, injectInbound);
+  runtime = new OpenCodeIntercomRuntime(undefined, directory, injectInbound, undefined, {
+    onInboundActivity(from) {
+      if (!fleetManagementEnabled) return;
+      void invokeAgentFleet({ action: "renew", id: from.id }, {
+        managerSessionId: runtime.getIdentity().sessionId,
+        cwd: directory,
+      }, { ...process.env, AGENT_INTERCOM_DISABLE_CLEANUP_TIMER: "1" }).catch(() => undefined);
+    },
+  });
   const runtimeIdentity = runtime.getIdentity();
   healthReporter = new OpenCodePeerHealthReporter({
     path: process.env.AGENT_INTERCOM_OPENCODE_HEALTH_PATH,
@@ -366,6 +381,13 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
     intercomSessionId: runtimeIdentity.sessionId,
     serverUrl: serverUrl.toString(),
     directory,
+  });
+  runtime.setConnectionStateHandler((connected, error) => {
+    healthReporter.update({
+      connected,
+      status: connected ? activeSessionStatus : "reconnecting",
+      error: error?.message,
+    });
   });
   void (async () => {
     try {
@@ -379,7 +401,27 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
     }
   })();
   if (activeSessionID) rememberBounded(knownSessionIDs, activeSessionID);
-  const fleetManagementEnabled = isFleetManagementEnabled();
+  if (fleetManagementEnabled) {
+    fleetHeartbeat = setInterval(() => {
+      if (fleetHeartbeatRunning) return;
+      fleetHeartbeatRunning = true;
+      void invokeAgentFleet({ action: "_heartbeat" }, {
+        managerSessionId: runtimeIdentity.sessionId,
+        cwd: directory,
+      }).then(async (result) => {
+        const requests = Array.isArray(result?.details?.checkpointRequests) ? result.details.checkpointRequests : [];
+        for (const request of requests) {
+          if (typeof request?.target !== "string" || typeof request?.message !== "string") continue;
+          await runtime.send(request.target, request.message);
+        }
+      }).catch((error) => {
+        logInject("fleet.heartbeat.error", { error: formatError(error) });
+      }).finally(() => {
+        fleetHeartbeatRunning = false;
+      });
+    }, 60_000);
+    fleetHeartbeat.unref?.();
+  }
   const stopControlServer = startOpenCodeControlServer({
     acceptsSession: sessionID => knownSessionIDs.has(sessionID),
     async handle(action) {
@@ -403,6 +445,8 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
 
   return {
     dispose: async () => {
+      if (fleetHeartbeat) clearInterval(fleetHeartbeat);
+      fleetHeartbeat = undefined;
       stopControlServer();
       healthReporter.update({ connected: false, ready: false, status: "stopped" });
       await runtime.disconnect();
@@ -426,6 +470,7 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
             fresh: tool.schema.boolean().optional().describe("Start a fresh persistent session rather than resume this worker ID."),
             all: tool.schema.boolean().optional().describe("Include workers owned by other manager sessions for list/status diagnostics."),
             execute: tool.schema.boolean().optional().describe("Actually execute cleanup or updates; false previews."),
+            acknowledge: tool.schema.boolean().optional().describe("Manager acknowledgment required before deleting a stopped worker record."),
             lines: tool.schema.number().optional().describe("Journal lines for logs."),
           },
           async execute(args, context) {
@@ -501,7 +546,7 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
       }),
 
       intercom_ask: tool({
-        description: "Ask another local intercom session a blocking question and wait briefly for a reply.",
+        description: "Ask another local intercom session a question only when the next step depends on its reply. Use intercom_send for assignments, progress/status checkpoints, and notifications.",
         args: {
           to: tool.schema.string().describe("Target session name, id, or unique id prefix."),
           message: tool.schema.string().describe("Question text to send."),
@@ -528,15 +573,15 @@ export const OpenCodeIntercomPlugin: Plugin = async ({ client, directory, server
       }),
 
       intercom_reply: tool({
-        description: "Reply to a pending inbound intercom ask.",
+        description: "Reply to a pending inbound intercom ask. Use to plus which=oldest/latest when one sender has multiple unresolved asks.",
         args: {
           message: tool.schema.string().describe("Reply text."),
-          to: tool.schema.string().optional().describe("Optional sender name/id if there are multiple pending asks."),
-          reply_to: tool.schema.string().optional().describe("Optional message id from intercom_pending."),
+          to: tool.schema.string().optional().describe("Optional sender name/id; never a message or thread ID."),
+          which: tool.schema.enum(["oldest", "latest"]).optional().describe("Select the oldest or latest ask from the chosen sender."),
         },
         async execute(args, context) {
           setActiveSession(context.sessionID);
-          return resultText(await runtime.reply(args.message, args.to, args.reply_to));
+          return resultText(await runtime.reply(args.message, args.to, args.which));
         },
       }),
     },
