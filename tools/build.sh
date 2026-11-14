@@ -77,6 +77,8 @@ for companion in agent-intercom-claude agent-intercom-codex agent-intercom-openc
     if [[ -f "$companion_lock/.npmrc" ]]; then cp "$companion_lock/.npmrc" "$work/packages/$companion/.npmrc"; fi
     if [[ "$companion" == agent-intercom-opencode ]]; then
         (export npm_config_allow_remote=all; cd "$work/packages/$companion" && npm ci --ignore-scripts --no-audit --no-fund)
+        # native optional accelerators of msgpackr-extract; msgpackr falls back to its JS path
+        rm -rf "$work/packages/$companion/node_modules/@msgpackr-extract"
     else
         (cd "$work/packages/$companion" && npm ci --ignore-scripts --no-audit --no-fund)
     fi
