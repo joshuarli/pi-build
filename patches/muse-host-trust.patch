@@ -1,0 +1,31 @@
+--- a/src/home.ts
++++ b/src/home.ts
+@@ -20,6 +20,8 @@
+ 	skillsOff: SkillsOff;
+ 	/** Extra settings (tests point Muse Code at a fake endpoint with this). */
+ 	overlay?: Record<string, unknown>;
++	/** Absolute workspace root this host will open. Muse Code loads MCP servers only in a trusted workspace. */
++	cwd?: string;
+ }
+ 
+ /**
+@@ -68,6 +70,9 @@
+ 	const dir = join(xdg, "muse");
+ 	mkdirSync(dir, { recursive: true, mode: 0o700 });
+ 	writeFileSync(join(dir, "settings.json"), JSON.stringify(hostSettings(input), null, 1), { mode: 0o600 });
++	if (input.cwd) {
++		writeFileSync(join(dir, "trust.json"), JSON.stringify({ schema_version: 1, projects: { [input.cwd]: { decision: "trusted" } } }, null, 1), { mode: 0o600 });
++	}
+ 	const auth = join(userConfigDir, "auth.json");
+ 	if (existsSync(auth)) symlinkSync(auth, join(dir, "auth.json"));
+ 	return xdg;
+--- a/src/host.ts
++++ b/src/host.ts
+@@ -162,6 +162,7 @@
+ 			toolset: spec.ephemeral ? [] : [MCP_TOOLSET],
+ 			...(mcp ? { mcpUrl: mcp.url } : {}),
+ 			skillsOff: await host.skillsOff(),
++			cwd: spec.cwd,
+ 			...(host.settingsOverlay ? { overlay: host.settingsOverlay } : {}),
+ 		});
+ 		const args = ["serve", "--contributor-mode", host.contributorMode, "--disable-request-user-input"];

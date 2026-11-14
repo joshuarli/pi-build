@@ -30,6 +30,7 @@ export HOME="$work/home" TMPDIR="$work/tmp" npm_config_cache="$work/npm-cache"
 mkdir -p "$TMPDIR"
 "$PYTHON" -I -c 'import json,sys; from pathlib import Path; sys.path.insert(0,sys.argv[3]); from tools.vendor import materialize; materialize(json.loads(Path(sys.argv[1]).read_text()),Path(sys.argv[2]),Path(sys.argv[3]))' "$root/sources/upstreams.json" "$work/packages" "$root"
 (cd "$work/packages/pi-muse-subscription" && patch --silent -p1 < "$root/patches/muse-offline-catalog.patch")
+(cd "$work/packages/pi-muse-subscription" && patch --silent -p1 < "$root/patches/muse-host-trust.patch")
 
 jaq '.devDependencies = {"@types/node":"26.6.6","typescript":"5.9.3"} | .dependencies = {}' \
     "$work/packages/agent-intercom-core/package.json" > "$work/core-package.json"
@@ -108,6 +109,7 @@ revision=$(git -C "$root" rev-parse HEAD)
 provenance=$root/dist/$profile/provenance.json
 source_digest=$(shasum -a 256 "$root/sources/upstreams.json" | awk '{print $1}')
 patch_digest=$(shasum -a 256 "$root/patches/muse-offline-catalog.patch" | awk '{print $1}')
+trust_patch_digest=$(shasum -a 256 "$root/patches/muse-host-trust.patch" | awk '{print $1}')
 lock_digest=$(shasum -a 256 "$lockdir/package-lock.json" | awk '{print $1}')
 builder_tools_digest=$(cat "$root/tools/build.sh" "$root/tools/pack.py" "$root/tools/archive.py" "$root/tools/headless.mjs" | shasum -a 256 | awk '{print $1}')
 node_version=$(node --version)
@@ -126,8 +128,8 @@ if [[ ! -f "$provenance" ]]; then
 fi
 tmp=$provenance.tmp
 jaq --arg revision "$revision" --arg product "$product" --arg version "$version" --arg source "$source_digest" --arg patch "$patch_digest" --arg target "$target" --arg profile "$profile" --arg archive "$(basename "$output")" --arg sha "$archive_sha" \
-    --arg lock "$lock_digest" --arg core "$core_lock_digest" --arg tools "$builder_tools_digest" --arg node "$node_version" --arg npm "$npm_version" --arg python "$python_version" --arg jaq "$jaq_version" --arg zlib "$zlib_version" --argjson bytes "$archive_bytes" \
-    '.builder_revision=$revision | .profile=$profile | .product=$product | .version=$version | .sources_sha256=$source | .components //= {pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed",muse_adapter:"source-snapshot-packed+patch"} | .components.pi_subagents=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.intercom_pi=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.muse_adapter=(if $profile == "headless-usr" then "source-snapshot-packed+patch+compiled" else "source-snapshot-packed+patch" end) | .components.pi_ai=(if $profile == "headless-usr" then "verified-precompiled-registry-package+bedrock-disabled" else "verified-precompiled-registry-package" end) | .targets[$target]={target:$target,profile:$profile,archive:$archive,sha256:$sha,bytes:$bytes} | .inputs[$target]={lock_sha256:$lock,core_build_lock_sha256:$core,builder_tools_sha256:$tools,patches:{muse_offline_catalog_sha256:$patch},toolchain:{node:$node,npm:$npm,python:$python,jaq:$jaq,zlib:$zlib}}' \
+    --arg lock "$lock_digest" --arg core "$core_lock_digest" --arg tools "$builder_tools_digest" --arg node "$node_version" --arg npm "$npm_version" --arg python "$python_version" --arg jaq "$jaq_version" --arg zlib "$zlib_version" --arg trust "$trust_patch_digest" --argjson bytes "$archive_bytes" \
+    '.builder_revision=$revision | .profile=$profile | .product=$product | .version=$version | .sources_sha256=$source | .components //= {pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed",muse_adapter:"source-snapshot-packed+patch"} | .components.pi_subagents=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.intercom_pi=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.muse_adapter=(if $profile == "headless-usr" then "source-snapshot-packed+patch+compiled" else "source-snapshot-packed+patch" end) | .components.pi_ai=(if $profile == "headless-usr" then "verified-precompiled-registry-package+bedrock-disabled" else "verified-precompiled-registry-package" end) | .targets[$target]={target:$target,profile:$profile,archive:$archive,sha256:$sha,bytes:$bytes} | .inputs[$target]={lock_sha256:$lock,core_build_lock_sha256:$core,builder_tools_sha256:$tools,patches:{muse_offline_catalog_sha256:$patch,muse_host_trust_sha256:$trust},toolchain:{node:$node,npm:$npm,python:$python,jaq:$jaq,zlib:$zlib}}' \
     "$provenance" > "$tmp"
 mv "$tmp" "$provenance"
 (cd "$(dirname "$output")" && : > SHA256SUMS && for artifact in *.tar.xz; do
