@@ -1,0 +1,1151 @@
+--- a/agent-intercom-pi/broker/access-credential.ts
++++ b/agent-intercom-pi/broker/access-credential.ts
+@@ -1,4 +1,4 @@
+-import { readFileSync } from "fs";
++import { readRemoteCredential } from "./remote-transport.ts";
+ import { writeDurableJson } from "../durable-json.ts";
+ import type { RemoteAccessMetadata, RemoteRegistrationAccess } from "../types.ts";
+ 
+@@ -30,7 +30,7 @@
+ export function loadRemoteAccessCredential(env: NodeJS.ProcessEnv = process.env): LoadedRemoteAccessCredential | undefined {
+   const path = env[ACCESS_CREDENTIAL_ENV]?.trim();
+   if (!path) return undefined;
+-  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
++  const parsed: unknown = JSON.parse(readRemoteCredential(path));
+   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+     throw new Error(`Invalid Agent Intercom access credential at ${path}`);
+   }
+--- a/agent-intercom-pi/broker/broker.ts
++++ b/agent-intercom-pi/broker/broker.ts
+@@ -16,6 +16,7 @@
+   getBrokerPortFilePath,
+   getIntercomDirPath,
+   getRemoteGatewaySocketPath,
++  getRemoteBrokerListenTarget,
+   INTERCOM_PROTOCOL_NAME,
+   INTERCOM_PROTOCOL_VERSION,
+   INTERCOM_RUNTIME_FILE_MODE,
+@@ -56,6 +57,13 @@
+ const INTERCOM_DIR = getIntercomDirPath();
+ const LISTEN_TARGET = getBrokerListenTarget();
+ const REMOTE_LISTEN_TARGET = getRemoteGatewaySocketPath();
++const TAILNET_LISTEN_TARGET = getRemoteBrokerListenTarget();
++if (TAILNET_LISTEN_TARGET === LISTEN_TARGET || TAILNET_LISTEN_TARGET === REMOTE_LISTEN_TARGET) {
++  throw new Error("Remote listener must not replace the ordinary broker or gateway socket");
++}
++if (typeof TAILNET_LISTEN_TARGET === "string" && existsSync(TAILNET_LISTEN_TARGET)) {
++  throw new Error("Remote Unix listener path already exists; remove only a confirmed stale socket before restarting");
++}
+ const PID_PATH = join(INTERCOM_DIR, "broker.pid");
+ const OWNER_PATH = join(INTERCOM_DIR, "broker.owner");
+ const PORT_PATH = getBrokerPortFilePath(INTERCOM_DIR);
+@@ -260,6 +268,7 @@
+   private unregisteredConnections = new Set<net.Socket>();
+   private server: net.Server;
+   private remoteServer: net.Server | null = null;
++  private tailnetServer: net.Server | null = null;
+   private shutdownTimer: NodeJS.Timeout | null = null;
+   private expiryTimer: NodeJS.Timeout | null = null;
+   private readonly askTimeoutMs = getAskTimeoutMs();
+@@ -286,13 +295,17 @@
+     if (process.platform !== "win32" && typeof LISTEN_TARGET === "string") {
+       this.remoteServer = net.createServer((socket) => this.handleConnection(socket, "remote"));
+     }
++    if (TAILNET_LISTEN_TARGET !== undefined) {
++      this.tailnetServer = net.createServer((socket) => this.handleConnection(socket, "remote"));
++    }
+   }
+ 
+   start(): void {
+     let localListening = false;
+     let remoteListening = this.remoteServer === null;
++    let tailnetListening = this.tailnetServer === null;
+     const announceWhenReady = () => {
+-      if (!localListening || !remoteListening) return;
++      if (!localListening || !remoteListening || !tailnetListening) return;
+       writeFileSync(PID_PATH, String(process.pid), { mode: INTERCOM_RUNTIME_FILE_MODE });
+       restrictIntercomRuntimeFile(PID_PATH);
+       console.log(`Intercom broker started (pid: ${process.pid}, remote-access-v1)`);
+@@ -329,6 +342,18 @@
+         remoteListening = true;
+         announceWhenReady();
+       });
++    }
++    if (this.tailnetServer && TAILNET_LISTEN_TARGET !== undefined) {
++      const onTailnetListening = () => {
++        if (typeof TAILNET_LISTEN_TARGET === "string") restrictIntercomRuntimeFile(TAILNET_LISTEN_TARGET);
++        tailnetListening = true;
++        announceWhenReady();
++      };
++      if (typeof TAILNET_LISTEN_TARGET === "string") {
++        this.tailnetServer.listen(TAILNET_LISTEN_TARGET, onTailnetListening);
++      } else {
++        this.tailnetServer.listen({ host: TAILNET_LISTEN_TARGET.host, port: TAILNET_LISTEN_TARGET.port }, onTailnetListening);
++      }
+     }
+     this.expiryTimer = setInterval(() => this.reconcileExpiredPrincipals(), REMOTE_EXPIRY_SWEEP_MS);
+     this.expiryTimer.unref?.();
+@@ -476,7 +501,7 @@
+   }
+ 
+   private scheduleShutdownCheck(): void {
+-    if (this.shutdownTimer) return;
++    if (TAILNET_LISTEN_TARGET !== undefined || this.shutdownTimer) return;
+ 
+     this.shutdownTimer = setTimeout(() => {
+       this.shutdownTimer = null;
+@@ -1945,8 +1970,12 @@
+       }
+       releaseBrokerOwnership(OWNER_PATH);
+     }
++    if (ownsBroker && typeof TAILNET_LISTEN_TARGET === "string" && this.tailnetServer?.listening) {
++      try { unlinkSync(TAILNET_LISTEN_TARGET); } catch { /* Already removed. */ }
++    }
+     this.server.close();
+     this.remoteServer?.close();
++    this.tailnetServer?.close();
+     process.exit(0);
+   }
+ }
+--- a/agent-intercom-pi/broker/paths.ts
++++ b/agent-intercom-pi/broker/paths.ts
+@@ -1,6 +1,8 @@
+ import { chmodSync, mkdirSync, readFileSync } from "fs";
+ import { isAbsolute, join, resolve } from "path";
+ import { homedir } from "os";
++import { getRemoteBrokerConnectTarget } from "./remote-transport.ts";
++export { getRemoteBrokerListenTarget, isRemoteBrokerConfigured } from "./remote-transport.ts";
+ 
+ export const INTERCOM_DIR_MODE = 0o700;
+ export const INTERCOM_RUNTIME_FILE_MODE = 0o600;
+@@ -104,6 +106,8 @@
+   env: NodeJS.ProcessEnv = process.env,
+   intercomDir: string = getIntercomDirPath(getAgentDirPath(env)),
+ ): BrokerConnectTarget {
++  const remote = getRemoteBrokerConnectTarget(env);
++  if (remote !== undefined) return remote;
+   if (shouldUseWindowsTcpTransport(platform, env)) {
+     const endpointFile = getBrokerPortFilePath(intercomDir);
+     const raw = readFileSync(endpointFile, "utf-8");
+--- /dev/null
++++ b/agent-intercom-pi/broker/remote-transport.ts
+@@ -0,0 +1,102 @@
++import { isIP } from "node:net";
++import { isAbsolute } from "node:path";
++import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
++
++export interface RemoteTcpTarget {
++  transport: "tcp";
++  host: string;
++  port: number;
++}
++
++export type RemoteBrokerTarget = string | RemoteTcpTarget;
++
++const ENDPOINT_ENV = "AGENT_INTERCOM_REMOTE_ENDPOINT";
++const CREDENTIAL_ENV = "AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH";
++const LISTEN_ENV = "AGENT_INTERCOM_REMOTE_LISTEN";
++
++export function isRemoteBrokerConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
++  // An explicitly empty value is a configuration error, never local fallback.
++  return env[ENDPOINT_ENV] !== undefined;
++}
++
++function isTailnetAddress(host: string): boolean {
++  if (isIP(host) === 4) {
++    const bytes = host.split(".").map(Number);
++    return bytes[0] === 100 && bytes[1] >= 64 && bytes[1] <= 127;
++  }
++  return isIP(host) === 6 && /^fd7a:115c:a1e0:/i.test(host);
++}
++
++export function parseRemoteBrokerTarget(value: string, setting = ENDPOINT_ENV): RemoteBrokerTarget {
++  if (!value || value !== value.trim() || /[\u0000-\u0020\u007f]/.test(value)) {
++    throw new Error(`${setting} must be a nonempty endpoint without whitespace`);
++  }
++  let endpoint: URL;
++  try {
++    endpoint = new URL(value);
++  } catch {
++    throw new Error(`${setting} must be tcp://<tailnet-IP>:<port> or unix:///absolute/socket`);
++  }
++  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
++    throw new Error(`${setting} cannot contain credentials, query parameters, or fragments`);
++  }
++  if (endpoint.protocol === "unix:") {
++    if (!value.startsWith("unix:///") || endpoint.host) {
++      throw new Error(`${setting} requires an absolute Unix socket path`);
++    }
++    let path: string;
++    try {
++      path = decodeURIComponent(endpoint.pathname);
++    } catch {
++      throw new Error(`${setting} contains an invalid encoded socket path`);
++    }
++    if (!isAbsolute(path) || path === "/" || path.endsWith("/") || /[\u0000-\u001f\u007f]/.test(path)) {
++      throw new Error(`${setting} requires an absolute Unix socket file path`);
++    }
++    return path;
++  }
++  const host = endpoint.hostname.replace(/^\[|\]$/g, "");
++  const port = Number(endpoint.port);
++  if (endpoint.protocol !== "tcp:" || endpoint.pathname || !isTailnetAddress(host)
++      || !/^[0-9]+$/.test(endpoint.port) || !Number.isInteger(port) || port < 1 || port > 65535) {
++    throw new Error(`${setting} must use a literal Tailscale 100.64.0.0/10 or fd7a:115c:a1e0::/48 address and port 1–65535`);
++  }
++  return { transport: "tcp", host, port };
++}
++
++export function getRemoteBrokerConnectTarget(env: NodeJS.ProcessEnv = process.env): RemoteBrokerTarget | undefined {
++  if (!isRemoteBrokerConfigured(env)) {
++    if (env[CREDENTIAL_ENV] !== undefined) {
++      throw new Error(`${CREDENTIAL_ENV} requires ${ENDPOINT_ENV}; refusing local fallback`);
++    }
++    return undefined;
++  }
++  const path = env[CREDENTIAL_ENV];
++  if (!path || path !== path.trim() || !isAbsolute(path) || path.includes("\0")) {
++    throw new Error(`${ENDPOINT_ENV} requires an absolute ${CREDENTIAL_ENV}`);
++  }
++  return parseRemoteBrokerTarget(env[ENDPOINT_ENV]!, ENDPOINT_ENV);
++}
++
++export function getRemoteBrokerListenTarget(env: NodeJS.ProcessEnv = process.env): RemoteBrokerTarget | undefined {
++  if (env[LISTEN_ENV] === undefined) return undefined;
++  if (isRemoteBrokerConfigured(env)) {
++    throw new Error(`${LISTEN_ENV} and ${ENDPOINT_ENV} cannot be enabled in the same process`);
++  }
++  return parseRemoteBrokerTarget(env[LISTEN_ENV]!, LISTEN_ENV);
++}
++
++export function readRemoteCredential(path: string): string {
++  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
++  try {
++    const stat = fstatSync(fd);
++    if (!stat.isFile() || stat.size > 65536) throw new Error("Remote credential must be a regular file no larger than 64 KiB");
++    if (process.platform !== "win32" && ((stat.mode & 0o077) !== 0
++        || (typeof process.getuid === "function" && stat.uid !== process.getuid()))) {
++      throw new Error("Remote credential must be owned by the current user with mode 0600 or stricter");
++    }
++    return readFileSync(fd, "utf8");
++  } finally {
++    closeSync(fd);
++  }
++}
+--- a/agent-intercom-pi/broker/spawn.ts
++++ b/agent-intercom-pi/broker/spawn.ts
+@@ -12,6 +12,7 @@
+   ensureIntercomRuntimeDir,
+   getAgentDirPath,
+   getBrokerConnectTarget,
++  isRemoteBrokerConfigured,
+   getIntercomDirPath,
+   INTERCOM_PROTOCOL_NAME,
+   INTERCOM_PROTOCOL_VERSION,
+@@ -188,6 +189,12 @@
+ }
+ 
+ export async function spawnBrokerIfNeeded(brokerCommand: string, brokerArgs: string[]): Promise<void> {
++  if (isRemoteBrokerConfigured() || process.env.AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH !== undefined) {
++    // Validate before touching local state. A remote failure must never spawn,
++    // stop, or silently attach to a local broker.
++    getBrokerConnectTarget();
++    return;
++  }
+   ensureIntercomRuntimeDir(INTERCOM_DIR);
+ 
+   if (await isBrokerRunning()) {
+--- /dev/null
++++ b/agent-intercom-pi/coordinator-scope.ts
+@@ -0,0 +1,6 @@
++/** Ambient Intercom is reserved for top-level coordinators. */
++export function isCoordinatorSession(env: NodeJS.ProcessEnv = process.env): boolean {
++  return env.PI_SUBAGENT_CHILD !== "1"
++    && env.USR_SCOPED_WORKER !== "1"
++    && env.USR_REQUIRED_CHILD_EXTENSIONS_JSON === undefined;
++}
+--- a/agent-intercom-pi/index.ts
++++ b/agent-intercom-pi/index.ts
+@@ -5,6 +5,7 @@
+ import { Type } from "typebox";
+ import { Text } from "@earendil-works/pi-tui";
+ import { IntercomClient, type SendResult } from "./broker/client.ts";
++import { isCoordinatorSession } from "./coordinator-scope.ts";
+ import { parseBossControl } from "./broker/boss-adapter.ts";
+ import { spawnBrokerIfNeeded } from "./broker/spawn.ts";
+ import { SessionListOverlay } from "./ui/session-list.ts";
+@@ -621,6 +622,7 @@
+   return 1000;
+ }
+ export default function piIntercomExtension(pi: ExtensionAPI) {
++  if (!isCoordinatorSession()) return;
+   let client: IntercomClient | null = null;
+   const config: IntercomConfig = loadConfig();
+   const initialBossTeamScope = readBossTeamScope();
+--- a/agent-intercom-opencode/broker/access-credential.ts
++++ b/agent-intercom-opencode/broker/access-credential.ts
+@@ -1,4 +1,4 @@
+-import { readFileSync } from "fs";
++import { readRemoteCredential } from "./remote-transport.ts";
+ import { writeDurableJson } from "../durable-json.ts";
+ import type { RemoteAccessMetadata, RemoteRegistrationAccess } from "../types.ts";
+ 
+@@ -30,7 +30,7 @@
+ export function loadRemoteAccessCredential(env: NodeJS.ProcessEnv = process.env): LoadedRemoteAccessCredential | undefined {
+   const path = env[ACCESS_CREDENTIAL_ENV]?.trim();
+   if (!path) return undefined;
+-  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
++  const parsed: unknown = JSON.parse(readRemoteCredential(path));
+   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+     throw new Error(`Invalid Agent Intercom access credential at ${path}`);
+   }
+--- a/agent-intercom-opencode/broker/paths.ts
++++ b/agent-intercom-opencode/broker/paths.ts
+@@ -1,6 +1,8 @@
+ import { chmodSync, mkdirSync, readFileSync } from "fs";
+ import { isAbsolute, join, resolve } from "path";
+ import { homedir } from "os";
++import { getRemoteBrokerConnectTarget } from "./remote-transport.ts";
++export { getRemoteBrokerListenTarget, isRemoteBrokerConfigured } from "./remote-transport.ts";
+ 
+ export const INTERCOM_DIR_MODE = 0o700;
+ export const INTERCOM_RUNTIME_FILE_MODE = 0o600;
+@@ -108,6 +110,8 @@
+   env: NodeJS.ProcessEnv = process.env,
+   intercomDir: string = getIntercomDirPath(getAgentDirPath(env)),
+ ): BrokerConnectTarget {
++  const remote = getRemoteBrokerConnectTarget(env);
++  if (remote !== undefined) return remote;
+   if (shouldUseWindowsTcpTransport(platform, env)) {
+     const endpointFile = getBrokerPortFilePath(intercomDir);
+     const raw = readFileSync(endpointFile, "utf-8");
+--- /dev/null
++++ b/agent-intercom-opencode/broker/remote-transport.ts
+@@ -0,0 +1,102 @@
++import { isIP } from "node:net";
++import { isAbsolute } from "node:path";
++import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
++
++export interface RemoteTcpTarget {
++  transport: "tcp";
++  host: string;
++  port: number;
++}
++
++export type RemoteBrokerTarget = string | RemoteTcpTarget;
++
++const ENDPOINT_ENV = "AGENT_INTERCOM_REMOTE_ENDPOINT";
++const CREDENTIAL_ENV = "AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH";
++const LISTEN_ENV = "AGENT_INTERCOM_REMOTE_LISTEN";
++
++export function isRemoteBrokerConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
++  // An explicitly empty value is a configuration error, never local fallback.
++  return env[ENDPOINT_ENV] !== undefined;
++}
++
++function isTailnetAddress(host: string): boolean {
++  if (isIP(host) === 4) {
++    const bytes = host.split(".").map(Number);
++    return bytes[0] === 100 && bytes[1] >= 64 && bytes[1] <= 127;
++  }
++  return isIP(host) === 6 && /^fd7a:115c:a1e0:/i.test(host);
++}
++
++export function parseRemoteBrokerTarget(value: string, setting = ENDPOINT_ENV): RemoteBrokerTarget {
++  if (!value || value !== value.trim() || /[\u0000-\u0020\u007f]/.test(value)) {
++    throw new Error(`${setting} must be a nonempty endpoint without whitespace`);
++  }
++  let endpoint: URL;
++  try {
++    endpoint = new URL(value);
++  } catch {
++    throw new Error(`${setting} must be tcp://<tailnet-IP>:<port> or unix:///absolute/socket`);
++  }
++  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
++    throw new Error(`${setting} cannot contain credentials, query parameters, or fragments`);
++  }
++  if (endpoint.protocol === "unix:") {
++    if (!value.startsWith("unix:///") || endpoint.host) {
++      throw new Error(`${setting} requires an absolute Unix socket path`);
++    }
++    let path: string;
++    try {
++      path = decodeURIComponent(endpoint.pathname);
++    } catch {
++      throw new Error(`${setting} contains an invalid encoded socket path`);
++    }
++    if (!isAbsolute(path) || path === "/" || path.endsWith("/") || /[\u0000-\u001f\u007f]/.test(path)) {
++      throw new Error(`${setting} requires an absolute Unix socket file path`);
++    }
++    return path;
++  }
++  const host = endpoint.hostname.replace(/^\[|\]$/g, "");
++  const port = Number(endpoint.port);
++  if (endpoint.protocol !== "tcp:" || endpoint.pathname || !isTailnetAddress(host)
++      || !/^[0-9]+$/.test(endpoint.port) || !Number.isInteger(port) || port < 1 || port > 65535) {
++    throw new Error(`${setting} must use a literal Tailscale 100.64.0.0/10 or fd7a:115c:a1e0::/48 address and port 1–65535`);
++  }
++  return { transport: "tcp", host, port };
++}
++
++export function getRemoteBrokerConnectTarget(env: NodeJS.ProcessEnv = process.env): RemoteBrokerTarget | undefined {
++  if (!isRemoteBrokerConfigured(env)) {
++    if (env[CREDENTIAL_ENV] !== undefined) {
++      throw new Error(`${CREDENTIAL_ENV} requires ${ENDPOINT_ENV}; refusing local fallback`);
++    }
++    return undefined;
++  }
++  const path = env[CREDENTIAL_ENV];
++  if (!path || path !== path.trim() || !isAbsolute(path) || path.includes("\0")) {
++    throw new Error(`${ENDPOINT_ENV} requires an absolute ${CREDENTIAL_ENV}`);
++  }
++  return parseRemoteBrokerTarget(env[ENDPOINT_ENV]!, ENDPOINT_ENV);
++}
++
++export function getRemoteBrokerListenTarget(env: NodeJS.ProcessEnv = process.env): RemoteBrokerTarget | undefined {
++  if (env[LISTEN_ENV] === undefined) return undefined;
++  if (isRemoteBrokerConfigured(env)) {
++    throw new Error(`${LISTEN_ENV} and ${ENDPOINT_ENV} cannot be enabled in the same process`);
++  }
++  return parseRemoteBrokerTarget(env[LISTEN_ENV]!, LISTEN_ENV);
++}
++
++export function readRemoteCredential(path: string): string {
++  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
++  try {
++    const stat = fstatSync(fd);
++    if (!stat.isFile() || stat.size > 65536) throw new Error("Remote credential must be a regular file no larger than 64 KiB");
++    if (process.platform !== "win32" && ((stat.mode & 0o077) !== 0
++        || (typeof process.getuid === "function" && stat.uid !== process.getuid()))) {
++      throw new Error("Remote credential must be owned by the current user with mode 0600 or stricter");
++    }
++    return readFileSync(fd, "utf8");
++  } finally {
++    closeSync(fd);
++  }
++}
+--- a/agent-intercom-opencode/broker/spawn.ts
++++ b/agent-intercom-opencode/broker/spawn.ts
+@@ -14,6 +14,7 @@
+   ensureIntercomRuntimeDir,
+   getAgentDirPath,
+   getBrokerConnectTarget,
++  isRemoteBrokerConfigured,
+   getIntercomDirPath,
+   INTERCOM_PROTOCOL_NAME,
+   INTERCOM_PROTOCOL_VERSION,
+@@ -215,6 +216,12 @@
+ }
+ 
+ export async function spawnBrokerIfNeeded(brokerCommand: string, brokerArgs: string[]): Promise<void> {
++  if (isRemoteBrokerConfigured() || process.env.AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH !== undefined) {
++    // Validate before touching local state. A remote failure must never spawn,
++    // stop, or silently attach to a local broker.
++    getBrokerConnectTarget();
++    return;
++  }
+   ensureIntercomRuntimeDir(INTERCOM_DIR);
+ 
+   if (await isBrokerRunning()) {
+--- /dev/null
++++ b/agent-intercom-claude/broker/access-credential.ts
+@@ -0,0 +1,76 @@
++import { readRemoteCredential } from "./remote-transport.ts";
++import { writeDurableJson } from "../durable-json.ts";
++import type { RemoteAccessMetadata, RemoteRegistrationAccess } from "../types.ts";
++
++export const ACCESS_CREDENTIAL_ENV = "AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH";
++export const ACCESS_CREDENTIAL_VERSION = 1;
++
++export interface EnrollmentCredentialFile {
++  version?: typeof ACCESS_CREDENTIAL_VERSION;
++  enrollmentToken: string;
++}
++
++export interface SessionCredentialFile {
++  version: typeof ACCESS_CREDENTIAL_VERSION;
++  sessionCredential: string;
++  sessionId: string;
++  generation: number;
++}
++
++export interface LoadedRemoteAccessCredential {
++  path: string;
++  access: RemoteRegistrationAccess;
++  enrollment: boolean;
++}
++
++function nonEmptyString(value: unknown): value is string {
++  return typeof value === "string" && value.length > 0 && !value.includes("\0");
++}
++
++export function loadRemoteAccessCredential(env: NodeJS.ProcessEnv = process.env): LoadedRemoteAccessCredential | undefined {
++  const path = env[ACCESS_CREDENTIAL_ENV]?.trim();
++  if (!path) return undefined;
++  const parsed: unknown = JSON.parse(readRemoteCredential(path));
++  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
++    throw new Error(`Invalid Agent Intercom access credential at ${path}`);
++  }
++  const credential = parsed as Record<string, unknown>;
++  if (nonEmptyString(credential.enrollmentToken)) {
++    return { path, access: { enrollmentToken: credential.enrollmentToken }, enrollment: true };
++  }
++  if (
++    credential.version === ACCESS_CREDENTIAL_VERSION
++    && nonEmptyString(credential.sessionCredential)
++    && nonEmptyString(credential.sessionId)
++    && typeof credential.generation === "number"
++    && Number.isSafeInteger(credential.generation)
++    && credential.generation > 0
++  ) {
++    return {
++      path,
++      access: {
++        sessionCredential: credential.sessionCredential,
++        sessionId: credential.sessionId,
++        generation: credential.generation,
++      },
++      enrollment: false,
++    };
++  }
++  throw new Error(`Invalid Agent Intercom access credential at ${path}`);
++}
++
++export function writeRemoteSessionCredential(
++  path: string,
++  sessionId: string,
++  metadata: RemoteAccessMetadata,
++): void {
++  if (!metadata.sessionCredential) {
++    throw new Error("Remote enrollment response omitted the session credential");
++  }
++  writeDurableJson(path, {
++    version: ACCESS_CREDENTIAL_VERSION,
++    sessionCredential: metadata.sessionCredential,
++    sessionId,
++    generation: metadata.generation,
++  } satisfies SessionCredentialFile);
++}
+--- a/agent-intercom-claude/broker/client.ts
++++ b/agent-intercom-claude/broker/client.ts
+@@ -1,6 +1,9 @@
+ import { EventEmitter } from "events";
+ import net from "net";
+ import { randomUUID } from "crypto";
++import { POLICY_SEMANTICS_VERSION } from "@dataforxyz/agent-intercom-core/policy";
++import { POLICY_SEMANTICS_HASH } from "@dataforxyz/agent-intercom-core/vectors";
++import { loadRemoteAccessCredential, writeRemoteSessionCredential, type LoadedRemoteAccessCredential } from "./access-credential.ts";
+ import { writeMessage, createMessageReader } from "./framing.ts";
+ import { PersistentOutboundOutbox } from "../outbound-outbox.ts";
+ import {
+@@ -132,7 +135,28 @@
+   return session.trustedLocal === undefined || typeof session.trustedLocal === "boolean";
+ }
+ 
++function isRemoteAccessMetadata(value: unknown): value is import("../types.ts").RemoteAccessMetadata {
++  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
++  const access = value as Record<string, unknown>;
++  return access.origin === "remote"
++    && typeof access.remoteHostId === "string"
++    && typeof access.parentSessionId === "string"
++    && typeof access.rootSessionId === "string"
++    && typeof access.generation === "number"
++    && Number.isSafeInteger(access.generation)
++    && access.generation > 0
++    && typeof access.canDelegate === "boolean"
++    && typeof access.depth === "number"
++    && Number.isSafeInteger(access.depth)
++    && typeof access.maxDepth === "number"
++    && Number.isSafeInteger(access.maxDepth)
++    && typeof access.maxChildren === "number"
++    && Number.isSafeInteger(access.maxChildren)
++    && (access.sessionCredential === undefined || typeof access.sessionCredential === "string");
++}
++
+ export class IntercomClient extends EventEmitter {
++  private remoteAccessCredential: LoadedRemoteAccessCredential | undefined;
+   private socket: net.Socket | null = null;
+   private _sessionId: string | null = null;
+   private pendingSends = new Map<string, {
+@@ -203,6 +227,7 @@
+       let target: BrokerConnectTarget;
+       try {
+         target = getBrokerConnectTarget();
++        this.remoteAccessCredential = loadRemoteAccessCredential();
+         socket = connectToBrokerTarget(target);
+       } catch (error) {
+         reject(toError(error));
+@@ -311,7 +336,8 @@
+           protocol: INTERCOM_PROTOCOL_NAME,
+           version: INTERCOM_PROTOCOL_VERSION,
+           session,
+-          ...(sessionId ? { sessionId } : {}),
++          ...(!this.remoteAccessCredential && sessionId ? { sessionId } : {}),
++          ...(this.remoteAccessCredential ? { access: this.remoteAccessCredential.access } : {}),
+           ...(typeof target === "string" ? {} : { stateId: target.stateId }),
+         });
+       } catch (error) {
+@@ -349,6 +375,32 @@
+ 
+         if (this._sessionId !== null) {
+           throw new Error("Received duplicate registered message");
++        }
++
++        if (this.remoteAccessCredential) {
++          const contract = brokerMessage.remoteAccess;
++          const contractFields = typeof contract === "object" && contract !== null
++            ? contract as Record<string, unknown>
++            : undefined;
++          if (
++            !contractFields
++            || contractFields.feature !== "remote-access-v1"
++            || contractFields.policySemanticsVersion !== POLICY_SEMANTICS_VERSION
++            || contractFields.policySemanticsHash !== POLICY_SEMANTICS_HASH
++          ) {
++            throw new Error("Remote Intercom policy contract is absent or incompatible");
++          }
++          if (!isRemoteAccessMetadata(brokerMessage.access)) {
++            throw new Error("Remote Intercom registration omitted broker-owned provenance");
++          }
++          if (this.remoteAccessCredential.enrollment) {
++            writeRemoteSessionCredential(this.remoteAccessCredential.path, brokerMessage.sessionId, brokerMessage.access);
++          } else {
++            const reconnect = this.remoteAccessCredential.access;
++            if (!("sessionId" in reconnect) || reconnect.sessionId !== brokerMessage.sessionId || reconnect.generation !== brokerMessage.access.generation) {
++              throw new Error("Remote Intercom reconnect identity or generation changed unexpectedly");
++            }
++          }
+         }
+ 
+         this._sessionId = brokerMessage.sessionId;
+--- a/agent-intercom-claude/broker/paths.ts
++++ b/agent-intercom-claude/broker/paths.ts
+@@ -1,6 +1,8 @@
+ import { chmodSync, mkdirSync, readFileSync } from "fs";
+ import { isAbsolute, join, resolve } from "path";
+ import { homedir } from "os";
++import { getRemoteBrokerConnectTarget } from "./remote-transport.ts";
++export { getRemoteBrokerListenTarget, isRemoteBrokerConfigured } from "./remote-transport.ts";
+ 
+ export const INTERCOM_DIR_MODE = 0o700;
+ export const INTERCOM_RUNTIME_FILE_MODE = 0o600;
+@@ -82,6 +84,8 @@
+   env: NodeJS.ProcessEnv = process.env,
+   intercomDir: string = getIntercomDirPath(getAgentDirPath(env)),
+ ): BrokerConnectTarget {
++  const remote = getRemoteBrokerConnectTarget(env);
++  if (remote !== undefined) return remote;
+   if (shouldUseWindowsTcpTransport(platform, env)) {
+     const endpointFile = getBrokerPortFilePath(intercomDir);
+     const raw = readFileSync(endpointFile, "utf-8");
+--- /dev/null
++++ b/agent-intercom-claude/broker/remote-transport.ts
+@@ -0,0 +1,102 @@
++import { isIP } from "node:net";
++import { isAbsolute } from "node:path";
++import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
++
++export interface RemoteTcpTarget {
++  transport: "tcp";
++  host: string;
++  port: number;
++}
++
++export type RemoteBrokerTarget = string | RemoteTcpTarget;
++
++const ENDPOINT_ENV = "AGENT_INTERCOM_REMOTE_ENDPOINT";
++const CREDENTIAL_ENV = "AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH";
++const LISTEN_ENV = "AGENT_INTERCOM_REMOTE_LISTEN";
++
++export function isRemoteBrokerConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
++  // An explicitly empty value is a configuration error, never local fallback.
++  return env[ENDPOINT_ENV] !== undefined;
++}
++
++function isTailnetAddress(host: string): boolean {
++  if (isIP(host) === 4) {
++    const bytes = host.split(".").map(Number);
++    return bytes[0] === 100 && bytes[1] >= 64 && bytes[1] <= 127;
++  }
++  return isIP(host) === 6 && /^fd7a:115c:a1e0:/i.test(host);
++}
++
++export function parseRemoteBrokerTarget(value: string, setting = ENDPOINT_ENV): RemoteBrokerTarget {
++  if (!value || value !== value.trim() || /[\u0000-\u0020\u007f]/.test(value)) {
++    throw new Error(`${setting} must be a nonempty endpoint without whitespace`);
++  }
++  let endpoint: URL;
++  try {
++    endpoint = new URL(value);
++  } catch {
++    throw new Error(`${setting} must be tcp://<tailnet-IP>:<port> or unix:///absolute/socket`);
++  }
++  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
++    throw new Error(`${setting} cannot contain credentials, query parameters, or fragments`);
++  }
++  if (endpoint.protocol === "unix:") {
++    if (!value.startsWith("unix:///") || endpoint.host) {
++      throw new Error(`${setting} requires an absolute Unix socket path`);
++    }
++    let path: string;
++    try {
++      path = decodeURIComponent(endpoint.pathname);
++    } catch {
++      throw new Error(`${setting} contains an invalid encoded socket path`);
++    }
++    if (!isAbsolute(path) || path === "/" || path.endsWith("/") || /[\u0000-\u001f\u007f]/.test(path)) {
++      throw new Error(`${setting} requires an absolute Unix socket file path`);
++    }
++    return path;
++  }
++  const host = endpoint.hostname.replace(/^\[|\]$/g, "");
++  const port = Number(endpoint.port);
++  if (endpoint.protocol !== "tcp:" || endpoint.pathname || !isTailnetAddress(host)
++      || !/^[0-9]+$/.test(endpoint.port) || !Number.isInteger(port) || port < 1 || port > 65535) {
++    throw new Error(`${setting} must use a literal Tailscale 100.64.0.0/10 or fd7a:115c:a1e0::/48 address and port 1–65535`);
++  }
++  return { transport: "tcp", host, port };
++}
++
++export function getRemoteBrokerConnectTarget(env: NodeJS.ProcessEnv = process.env): RemoteBrokerTarget | undefined {
++  if (!isRemoteBrokerConfigured(env)) {
++    if (env[CREDENTIAL_ENV] !== undefined) {
++      throw new Error(`${CREDENTIAL_ENV} requires ${ENDPOINT_ENV}; refusing local fallback`);
++    }
++    return undefined;
++  }
++  const path = env[CREDENTIAL_ENV];
++  if (!path || path !== path.trim() || !isAbsolute(path) || path.includes("\0")) {
++    throw new Error(`${ENDPOINT_ENV} requires an absolute ${CREDENTIAL_ENV}`);
++  }
++  return parseRemoteBrokerTarget(env[ENDPOINT_ENV]!, ENDPOINT_ENV);
++}
++
++export function getRemoteBrokerListenTarget(env: NodeJS.ProcessEnv = process.env): RemoteBrokerTarget | undefined {
++  if (env[LISTEN_ENV] === undefined) return undefined;
++  if (isRemoteBrokerConfigured(env)) {
++    throw new Error(`${LISTEN_ENV} and ${ENDPOINT_ENV} cannot be enabled in the same process`);
++  }
++  return parseRemoteBrokerTarget(env[LISTEN_ENV]!, LISTEN_ENV);
++}
++
++export function readRemoteCredential(path: string): string {
++  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
++  try {
++    const stat = fstatSync(fd);
++    if (!stat.isFile() || stat.size > 65536) throw new Error("Remote credential must be a regular file no larger than 64 KiB");
++    if (process.platform !== "win32" && ((stat.mode & 0o077) !== 0
++        || (typeof process.getuid === "function" && stat.uid !== process.getuid()))) {
++      throw new Error("Remote credential must be owned by the current user with mode 0600 or stricter");
++    }
++    return readFileSync(fd, "utf8");
++  } finally {
++    closeSync(fd);
++  }
++}
+--- a/agent-intercom-claude/broker/spawn.ts
++++ b/agent-intercom-claude/broker/spawn.ts
+@@ -10,6 +10,7 @@
+   ensureIntercomRuntimeDir,
+   getAgentDirPath,
+   getBrokerConnectTarget,
++  isRemoteBrokerConfigured,
+   getIntercomDirPath,
+   INTERCOM_PROTOCOL_NAME,
+   INTERCOM_PROTOCOL_VERSION,
+@@ -183,6 +184,12 @@
+ }
+ 
+ export async function spawnBrokerIfNeeded(brokerCommand: string, brokerArgs: string[]): Promise<void> {
++  if (isRemoteBrokerConfigured() || process.env.AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH !== undefined) {
++    // Validate before touching local state. A remote failure must never spawn,
++    // stop, or silently attach to a local broker.
++    getBrokerConnectTarget();
++    return;
++  }
+   ensureIntercomRuntimeDir(INTERCOM_DIR);
+ 
+   if (await isBrokerRunning()) {
+--- a/agent-intercom-claude/types.ts
++++ b/agent-intercom-claude/types.ts
+@@ -83,3 +83,29 @@
+   | { type: "ask_deferred"; messageId: string; fromSessionId: string }
+   | { type: "ask_cancelled"; messageId: string; fromSessionId: string; reason: AskCancellationReason }
+   | { type: "ask_control_result"; requestId: string; action: "defer" | "cancel"; messageId: string; applied: boolean };
++
++export interface RemoteEnrollmentAccess {
++  enrollmentToken: string;
++}
++
++export interface RemoteSessionAccess {
++  sessionCredential: string;
++  sessionId: string;
++  generation: number;
++}
++
++export type RemoteRegistrationAccess = RemoteEnrollmentAccess | RemoteSessionAccess;
++
++export interface RemoteAccessMetadata {
++  origin: "remote";
++  remoteHostId: string;
++  parentSessionId: string;
++  rootSessionId: string;
++  generation: number;
++  canDelegate: boolean;
++  depth: number;
++  maxDepth: number;
++  maxChildren: number;
++  sessionCredential?: string;
++}
++
+--- /dev/null
++++ b/agent-intercom-codex/broker/access-credential.ts
+@@ -0,0 +1,76 @@
++import { readRemoteCredential } from "./remote-transport.ts";
++import { writeDurableJson } from "../durable-json.ts";
++import type { RemoteAccessMetadata, RemoteRegistrationAccess } from "../types.ts";
++
++export const ACCESS_CREDENTIAL_ENV = "AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH";
++export const ACCESS_CREDENTIAL_VERSION = 1;
++
++export interface EnrollmentCredentialFile {
++  version?: typeof ACCESS_CREDENTIAL_VERSION;
++  enrollmentToken: string;
++}
++
++export interface SessionCredentialFile {
++  version: typeof ACCESS_CREDENTIAL_VERSION;
++  sessionCredential: string;
++  sessionId: string;
++  generation: number;
++}
++
++export interface LoadedRemoteAccessCredential {
++  path: string;
++  access: RemoteRegistrationAccess;
++  enrollment: boolean;
++}
++
++function nonEmptyString(value: unknown): value is string {
++  return typeof value === "string" && value.length > 0 && !value.includes("\0");
++}
++
++export function loadRemoteAccessCredential(env: NodeJS.ProcessEnv = process.env): LoadedRemoteAccessCredential | undefined {
++  const path = env[ACCESS_CREDENTIAL_ENV]?.trim();
++  if (!path) return undefined;
++  const parsed: unknown = JSON.parse(readRemoteCredential(path));
++  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
++    throw new Error(`Invalid Agent Intercom access credential at ${path}`);
++  }
++  const credential = parsed as Record<string, unknown>;
++  if (nonEmptyString(credential.enrollmentToken)) {
++    return { path, access: { enrollmentToken: credential.enrollmentToken }, enrollment: true };
++  }
++  if (
++    credential.version === ACCESS_CREDENTIAL_VERSION
++    && nonEmptyString(credential.sessionCredential)
++    && nonEmptyString(credential.sessionId)
++    && typeof credential.generation === "number"
++    && Number.isSafeInteger(credential.generation)
++    && credential.generation > 0
++  ) {
++    return {
++      path,
++      access: {
++        sessionCredential: credential.sessionCredential,
++        sessionId: credential.sessionId,
++        generation: credential.generation,
++      },
++      enrollment: false,
++    };
++  }
++  throw new Error(`Invalid Agent Intercom access credential at ${path}`);
++}
++
++export function writeRemoteSessionCredential(
++  path: string,
++  sessionId: string,
++  metadata: RemoteAccessMetadata,
++): void {
++  if (!metadata.sessionCredential) {
++    throw new Error("Remote enrollment response omitted the session credential");
++  }
++  writeDurableJson(path, {
++    version: ACCESS_CREDENTIAL_VERSION,
++    sessionCredential: metadata.sessionCredential,
++    sessionId,
++    generation: metadata.generation,
++  } satisfies SessionCredentialFile);
++}
+--- a/agent-intercom-codex/broker/client.ts
++++ b/agent-intercom-codex/broker/client.ts
+@@ -1,6 +1,9 @@
+ import { EventEmitter } from "events";
+ import net from "net";
+ import { randomUUID } from "crypto";
++import { POLICY_SEMANTICS_VERSION } from "@dataforxyz/agent-intercom-core/policy";
++import { POLICY_SEMANTICS_HASH } from "@dataforxyz/agent-intercom-core/vectors";
++import { loadRemoteAccessCredential, writeRemoteSessionCredential, type LoadedRemoteAccessCredential } from "./access-credential.ts";
+ import { writeMessage, createMessageReader } from "./framing.ts";
+ import { PersistentOutboundOutbox } from "../outbound-outbox.ts";
+ import {
+@@ -132,7 +135,28 @@
+   return session.trustedLocal === undefined || typeof session.trustedLocal === "boolean";
+ }
+ 
++function isRemoteAccessMetadata(value: unknown): value is import("../types.ts").RemoteAccessMetadata {
++  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
++  const access = value as Record<string, unknown>;
++  return access.origin === "remote"
++    && typeof access.remoteHostId === "string"
++    && typeof access.parentSessionId === "string"
++    && typeof access.rootSessionId === "string"
++    && typeof access.generation === "number"
++    && Number.isSafeInteger(access.generation)
++    && access.generation > 0
++    && typeof access.canDelegate === "boolean"
++    && typeof access.depth === "number"
++    && Number.isSafeInteger(access.depth)
++    && typeof access.maxDepth === "number"
++    && Number.isSafeInteger(access.maxDepth)
++    && typeof access.maxChildren === "number"
++    && Number.isSafeInteger(access.maxChildren)
++    && (access.sessionCredential === undefined || typeof access.sessionCredential === "string");
++}
++
+ export class IntercomClient extends EventEmitter {
++  private remoteAccessCredential: LoadedRemoteAccessCredential | undefined;
+   private socket: net.Socket | null = null;
+   private _sessionId: string | null = null;
+   private pendingSends = new Map<string, {
+@@ -203,6 +227,7 @@
+       let target: BrokerConnectTarget;
+       try {
+         target = getBrokerConnectTarget();
++        this.remoteAccessCredential = loadRemoteAccessCredential();
+         socket = connectToBrokerTarget(target);
+       } catch (error) {
+         reject(toError(error));
+@@ -311,7 +336,8 @@
+           protocol: INTERCOM_PROTOCOL_NAME,
+           version: INTERCOM_PROTOCOL_VERSION,
+           session,
+-          ...(sessionId ? { sessionId } : {}),
++          ...(!this.remoteAccessCredential && sessionId ? { sessionId } : {}),
++          ...(this.remoteAccessCredential ? { access: this.remoteAccessCredential.access } : {}),
+           ...(typeof target === "string" ? {} : { stateId: target.stateId }),
+         });
+       } catch (error) {
+@@ -349,6 +375,32 @@
+ 
+         if (this._sessionId !== null) {
+           throw new Error("Received duplicate registered message");
++        }
++
++        if (this.remoteAccessCredential) {
++          const contract = brokerMessage.remoteAccess;
++          const contractFields = typeof contract === "object" && contract !== null
++            ? contract as Record<string, unknown>
++            : undefined;
++          if (
++            !contractFields
++            || contractFields.feature !== "remote-access-v1"
++            || contractFields.policySemanticsVersion !== POLICY_SEMANTICS_VERSION
++            || contractFields.policySemanticsHash !== POLICY_SEMANTICS_HASH
++          ) {
++            throw new Error("Remote Intercom policy contract is absent or incompatible");
++          }
++          if (!isRemoteAccessMetadata(brokerMessage.access)) {
++            throw new Error("Remote Intercom registration omitted broker-owned provenance");
++          }
++          if (this.remoteAccessCredential.enrollment) {
++            writeRemoteSessionCredential(this.remoteAccessCredential.path, brokerMessage.sessionId, brokerMessage.access);
++          } else {
++            const reconnect = this.remoteAccessCredential.access;
++            if (!("sessionId" in reconnect) || reconnect.sessionId !== brokerMessage.sessionId || reconnect.generation !== brokerMessage.access.generation) {
++              throw new Error("Remote Intercom reconnect identity or generation changed unexpectedly");
++            }
++          }
+         }
+ 
+         this._sessionId = brokerMessage.sessionId;
+--- a/agent-intercom-codex/broker/paths.ts
++++ b/agent-intercom-codex/broker/paths.ts
+@@ -1,6 +1,8 @@
+ import { chmodSync, mkdirSync, readFileSync } from "fs";
+ import { isAbsolute, join, resolve } from "path";
+ import { homedir } from "os";
++import { getRemoteBrokerConnectTarget } from "./remote-transport.ts";
++export { getRemoteBrokerListenTarget, isRemoteBrokerConfigured } from "./remote-transport.ts";
+ 
+ export const INTERCOM_DIR_MODE = 0o700;
+ export const INTERCOM_RUNTIME_FILE_MODE = 0o600;
+@@ -82,6 +84,8 @@
+   env: NodeJS.ProcessEnv = process.env,
+   intercomDir: string = getIntercomDirPath(getAgentDirPath(env)),
+ ): BrokerConnectTarget {
++  const remote = getRemoteBrokerConnectTarget(env);
++  if (remote !== undefined) return remote;
+   if (shouldUseWindowsTcpTransport(platform, env)) {
+     const endpointFile = getBrokerPortFilePath(intercomDir);
+     const raw = readFileSync(endpointFile, "utf-8");
+--- /dev/null
++++ b/agent-intercom-codex/broker/remote-transport.ts
+@@ -0,0 +1,102 @@
++import { isIP } from "node:net";
++import { isAbsolute } from "node:path";
++import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
++
++export interface RemoteTcpTarget {
++  transport: "tcp";
++  host: string;
++  port: number;
++}
++
++export type RemoteBrokerTarget = string | RemoteTcpTarget;
++
++const ENDPOINT_ENV = "AGENT_INTERCOM_REMOTE_ENDPOINT";
++const CREDENTIAL_ENV = "AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH";
++const LISTEN_ENV = "AGENT_INTERCOM_REMOTE_LISTEN";
++
++export function isRemoteBrokerConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
++  // An explicitly empty value is a configuration error, never local fallback.
++  return env[ENDPOINT_ENV] !== undefined;
++}
++
++function isTailnetAddress(host: string): boolean {
++  if (isIP(host) === 4) {
++    const bytes = host.split(".").map(Number);
++    return bytes[0] === 100 && bytes[1] >= 64 && bytes[1] <= 127;
++  }
++  return isIP(host) === 6 && /^fd7a:115c:a1e0:/i.test(host);
++}
++
++export function parseRemoteBrokerTarget(value: string, setting = ENDPOINT_ENV): RemoteBrokerTarget {
++  if (!value || value !== value.trim() || /[\u0000-\u0020\u007f]/.test(value)) {
++    throw new Error(`${setting} must be a nonempty endpoint without whitespace`);
++  }
++  let endpoint: URL;
++  try {
++    endpoint = new URL(value);
++  } catch {
++    throw new Error(`${setting} must be tcp://<tailnet-IP>:<port> or unix:///absolute/socket`);
++  }
++  if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
++    throw new Error(`${setting} cannot contain credentials, query parameters, or fragments`);
++  }
++  if (endpoint.protocol === "unix:") {
++    if (!value.startsWith("unix:///") || endpoint.host) {
++      throw new Error(`${setting} requires an absolute Unix socket path`);
++    }
++    let path: string;
++    try {
++      path = decodeURIComponent(endpoint.pathname);
++    } catch {
++      throw new Error(`${setting} contains an invalid encoded socket path`);
++    }
++    if (!isAbsolute(path) || path === "/" || path.endsWith("/") || /[\u0000-\u001f\u007f]/.test(path)) {
++      throw new Error(`${setting} requires an absolute Unix socket file path`);
++    }
++    return path;
++  }
++  const host = endpoint.hostname.replace(/^\[|\]$/g, "");
++  const port = Number(endpoint.port);
++  if (endpoint.protocol !== "tcp:" || endpoint.pathname || !isTailnetAddress(host)
++      || !/^[0-9]+$/.test(endpoint.port) || !Number.isInteger(port) || port < 1 || port > 65535) {
++    throw new Error(`${setting} must use a literal Tailscale 100.64.0.0/10 or fd7a:115c:a1e0::/48 address and port 1–65535`);
++  }
++  return { transport: "tcp", host, port };
++}
++
++export function getRemoteBrokerConnectTarget(env: NodeJS.ProcessEnv = process.env): RemoteBrokerTarget | undefined {
++  if (!isRemoteBrokerConfigured(env)) {
++    if (env[CREDENTIAL_ENV] !== undefined) {
++      throw new Error(`${CREDENTIAL_ENV} requires ${ENDPOINT_ENV}; refusing local fallback`);
++    }
++    return undefined;
++  }
++  const path = env[CREDENTIAL_ENV];
++  if (!path || path !== path.trim() || !isAbsolute(path) || path.includes("\0")) {
++    throw new Error(`${ENDPOINT_ENV} requires an absolute ${CREDENTIAL_ENV}`);
++  }
++  return parseRemoteBrokerTarget(env[ENDPOINT_ENV]!, ENDPOINT_ENV);
++}
++
++export function getRemoteBrokerListenTarget(env: NodeJS.ProcessEnv = process.env): RemoteBrokerTarget | undefined {
++  if (env[LISTEN_ENV] === undefined) return undefined;
++  if (isRemoteBrokerConfigured(env)) {
++    throw new Error(`${LISTEN_ENV} and ${ENDPOINT_ENV} cannot be enabled in the same process`);
++  }
++  return parseRemoteBrokerTarget(env[LISTEN_ENV]!, LISTEN_ENV);
++}
++
++export function readRemoteCredential(path: string): string {
++  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
++  try {
++    const stat = fstatSync(fd);
++    if (!stat.isFile() || stat.size > 65536) throw new Error("Remote credential must be a regular file no larger than 64 KiB");
++    if (process.platform !== "win32" && ((stat.mode & 0o077) !== 0
++        || (typeof process.getuid === "function" && stat.uid !== process.getuid()))) {
++      throw new Error("Remote credential must be owned by the current user with mode 0600 or stricter");
++    }
++    return readFileSync(fd, "utf8");
++  } finally {
++    closeSync(fd);
++  }
++}
+--- a/agent-intercom-codex/broker/spawn.ts
++++ b/agent-intercom-codex/broker/spawn.ts
+@@ -10,6 +10,7 @@
+   ensureIntercomRuntimeDir,
+   getAgentDirPath,
+   getBrokerConnectTarget,
++  isRemoteBrokerConfigured,
+   getIntercomDirPath,
+   INTERCOM_PROTOCOL_NAME,
+   INTERCOM_PROTOCOL_VERSION,
+@@ -183,6 +184,12 @@
+ }
+ 
+ export async function spawnBrokerIfNeeded(brokerCommand: string, brokerArgs: string[]): Promise<void> {
++  if (isRemoteBrokerConfigured() || process.env.AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH !== undefined) {
++    // Validate before touching local state. A remote failure must never spawn,
++    // stop, or silently attach to a local broker.
++    getBrokerConnectTarget();
++    return;
++  }
+   ensureIntercomRuntimeDir(INTERCOM_DIR);
+ 
+   if (await isBrokerRunning()) {
+--- a/agent-intercom-codex/types.ts
++++ b/agent-intercom-codex/types.ts
+@@ -83,3 +83,29 @@
+   | { type: "ask_deferred"; messageId: string; fromSessionId: string }
+   | { type: "ask_cancelled"; messageId: string; fromSessionId: string; reason: AskCancellationReason }
+   | { type: "ask_control_result"; requestId: string; action: "defer" | "cancel"; messageId: string; applied: boolean };
++
++export interface RemoteEnrollmentAccess {
++  enrollmentToken: string;
++}
++
++export interface RemoteSessionAccess {
++  sessionCredential: string;
++  sessionId: string;
++  generation: number;
++}
++
++export type RemoteRegistrationAccess = RemoteEnrollmentAccess | RemoteSessionAccess;
++
++export interface RemoteAccessMetadata {
++  origin: "remote";
++  remoteHostId: string;
++  parentSessionId: string;
++  rootSessionId: string;
++  generation: number;
++  canDelegate: boolean;
++  depth: number;
++  maxDepth: number;
++  maxChildren: number;
++  sessionCredential?: string;
++}
++

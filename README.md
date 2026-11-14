@@ -32,6 +32,13 @@ Each release has, per target, `pi-<profile>-<version>-<target>.tar.xz` and `pi-<
 
 The Pi CLI and SDK are exact-version precompiled registry packages whose package integrity values are in the npm lock. The intercom core is compiled from its preserved source. The Pi adapters are packed from preserved source snapshots. `patches/muse-offline-catalog.patch` and `patches/muse-host-trust.patch` apply only to the copied Muse source during packaging. `sources/` remains unchanged.
 
+Intercom additionally supports explicitly enrolled coordinator sessions across a
+tailnet. The reviewed `intercom-tailnet` patches and administration overlay apply
+only to copied sources, with their digest recorded in release provenance. Run
+`make test-intercom` for the broker/client protocol checks. See the
+[implementation and verification handoff](docs/verification/intercom-tailnet.md)
+for configuration, coordinator boundaries, release adoption and two-host checks.
+
 `PROFILE=headless-usr` builds a reduced runtime from the same locked inputs. Packaging compiles the three extensions and Intercom broker with the pinned build-time TypeScript compiler. The archive excludes source maps and type declarations, `tsx`, esbuild, and the AWS/Smithy packages. Bedrock requests return an explicit unsupported-profile error. The full profile retains Bedrock support.
 
 The reduced profile preserves docs, examples, licenses, images, the interactive CLI, and OpenCode Go's Anthropic, Google, and OpenAI protocols. It supplies runtime SDK JavaScript without development declarations. Pi retains `jiti` for user-provided extensions. `headless-usr` describes the intended consumer rather than a dedicated CLI entry point without interactive code.

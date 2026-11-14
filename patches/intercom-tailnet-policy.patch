@@ -1,0 +1,483 @@
+--- a/agent-intercom-core/src/policy.ts
++++ b/agent-intercom-core/src/policy.ts
+@@ -1,9 +1,9 @@
+-export const POLICY_SEMANTICS_VERSION = 2;
++export const POLICY_SEMANTICS_VERSION = 3;
+ 
+ export type PolicyAction = "discover" | "send" | "ask" | "reply" | "inspect_tree" | "delegate_child" | "revoke" | "adopt";
+ export type PrincipalKind = "local" | "remote";
+ export type PrincipalState = "active" | "revoked";
+-export type PrincipalPolicy = "local-public" | "remote-tree";
++export type PrincipalPolicy = "local-public" | "remote-tree" | "remote-fleet";
+ 
+ export interface PolicyPrincipal {
+   id: string;
+@@ -31,7 +31,7 @@
+   | "POLICY_DENIED";
+ 
+ export type AuthorizationDecision =
+-  | { allowed: true; reason: "self" | "local-public" | "direct-parent" | "ancestor-chain" | "ancestor-control" }
++  | { allowed: true; reason: "self" | "local-public" | "direct-parent" | "ancestor-chain" | "ancestor-control" | "fleet-coordinator" }
+   | { allowed: false; code: AuthorizationDenialCode };
+ 
+ function activePrincipal(state: PolicyState, id: string): PolicyPrincipal | undefined {
+@@ -70,6 +70,21 @@
+     || (context.targetGeneration !== undefined && context.targetGeneration !== target.generation)
+   ) {
+     return { allowed: false, code: "STALE_GENERATION" };
++  }
++  // Fleet grants are issued only by the local administrator for coordinators.
++  // They confer communication within one named fleet, never tree authority.
++  if (actor.policy === "remote-fleet" || target.policy === "remote-fleet") {
++    const communication = action === "discover" || action === "send" || action === "ask" || action === "reply";
++    if (
++      communication
++      && actor.kind === "remote" && target.kind === "remote"
++      && actor.policy === "remote-fleet" && target.policy === "remote-fleet"
++      && /^fleet:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(actor.rootSessionId)
++      && actor.rootSessionId === target.rootSessionId
++      && actor.parentSessionId === actor.rootSessionId
++      && target.parentSessionId === target.rootSessionId
++    ) return { allowed: true, reason: "fleet-coordinator" };
++    return { allowed: false, code: "POLICY_DENIED" };
+   }
+   if (actor.id === target.id) return { allowed: true, reason: "self" };
+   if (actor.kind === "local" && target.kind === "local") return { allowed: true, reason: "local-public" };
+--- a/agent-intercom-core/src/policy-vectors.ts
++++ b/agent-intercom-core/src/policy-vectors.ts
+@@ -55,6 +55,20 @@
+   rootSessionId: "local-root",
+ };
+ 
++const fleetCoordinator: PolicyPrincipal = {
++  id: "fleet-coordinator",
++  kind: "remote",
++  state: "active",
++  generation: 1,
++  policy: "remote-fleet",
++  parentSessionId: "fleet:personal",
++  rootSessionId: "fleet:personal",
++};
++const fleetPeer: PolicyPrincipal = { ...fleetCoordinator, id: "fleet-peer" };
++const otherFleet: PolicyPrincipal = {
++  ...fleetCoordinator, id: "other-fleet", parentSessionId: "fleet:other", rootSessionId: "fleet:other",
++};
++
+ export const POLICY_VECTORS: PolicyVector[] = [
+   {
+     name: "local sessions remain public",
+@@ -165,11 +179,97 @@
+     expectedAllowed: false,
+     expectedReasonOrCode: "STALE_GENERATION",
+   },
++  {
++    name: "fleet coordinators may discover across hosts",
++    principals: [fleetCoordinator, fleetPeer],
++    actorId: "fleet-coordinator", action: "discover", targetId: "fleet-peer",
++    expectedAllowed: true, expectedReasonOrCode: "fleet-coordinator",
++  },
++  {
++    name: "fleet coordinators may send across hosts",
++    principals: [fleetCoordinator, fleetPeer],
++    actorId: "fleet-coordinator", action: "send", targetId: "fleet-peer",
++    expectedAllowed: true, expectedReasonOrCode: "fleet-coordinator",
++  },
++  {
++    name: "fleet coordinators may ask across hosts",
++    principals: [fleetCoordinator, fleetPeer],
++    actorId: "fleet-coordinator", action: "ask", targetId: "fleet-peer",
++    expectedAllowed: true, expectedReasonOrCode: "fleet-coordinator",
++  },
++  {
++    name: "fleet coordinators may reply across hosts",
++    principals: [fleetCoordinator, fleetPeer],
++    actorId: "fleet-coordinator", action: "reply", targetId: "fleet-peer",
++    expectedAllowed: true, expectedReasonOrCode: "fleet-coordinator",
++  },
++  {
++    name: "fleet grant cannot discover other fleets",
++    principals: [fleetCoordinator, otherFleet],
++    actorId: "fleet-coordinator", action: "discover", targetId: "other-fleet",
++    expectedAllowed: false, expectedReasonOrCode: "POLICY_DENIED",
++  },
++  {
++    name: "fleet grant cannot discover local sessions",
++    principals: [fleetCoordinator, localRoot],
++    actorId: "fleet-coordinator", action: "discover", targetId: "local-root",
++    expectedAllowed: false, expectedReasonOrCode: "POLICY_DENIED",
++  },
++  {
++    name: "fleet grant cannot discover tree sessions",
++    principals: [fleetCoordinator, remoteManager],
++    actorId: "fleet-coordinator", action: "discover", targetId: "remote-manager",
++    expectedAllowed: false, expectedReasonOrCode: "POLICY_DENIED",
++  },
++  {
++    name: "fleet grant cannot inspect_tree even its own principal",
++    principals: [fleetCoordinator],
++    actorId: "fleet-coordinator", action: "inspect_tree", targetId: "fleet-coordinator",
++    expectedAllowed: false, expectedReasonOrCode: "POLICY_DENIED",
++  },
++  {
++    name: "fleet grant cannot delegate_child even its own principal",
++    principals: [fleetCoordinator],
++    actorId: "fleet-coordinator", action: "delegate_child", targetId: "fleet-coordinator",
++    expectedAllowed: false, expectedReasonOrCode: "POLICY_DENIED",
++  },
++  {
++    name: "fleet grant cannot revoke even its own principal",
++    principals: [fleetCoordinator],
++    actorId: "fleet-coordinator", action: "revoke", targetId: "fleet-coordinator",
++    expectedAllowed: false, expectedReasonOrCode: "POLICY_DENIED",
++  },
++  {
++    name: "fleet grant cannot adopt even its own principal",
++    principals: [fleetCoordinator],
++    actorId: "fleet-coordinator", action: "adopt", targetId: "fleet-coordinator",
++    expectedAllowed: false, expectedReasonOrCode: "POLICY_DENIED",
++  },
++  {
++    name: "revoked fleet coordinator cannot send",
++    principals: [{ ...fleetCoordinator, state: "revoked" }, fleetPeer],
++    actorId: "fleet-coordinator", action: "send", targetId: "fleet-peer",
++    expectedAllowed: false, expectedReasonOrCode: "REVOKED_PRINCIPAL",
++  },
++  {
++    name: "stale fleet coordinator generation cannot send",
++    principals: [{ ...fleetCoordinator, generation: 2 }, fleetPeer],
++    actorId: "fleet-coordinator", action: "send", targetId: "fleet-peer",
++    context: { actorGeneration: 1 },
++    expectedAllowed: false, expectedReasonOrCode: "STALE_GENERATION",
++  },
++  {
++    name: "fleet metadata cannot inherit a local ancestor edge",
++    principals: [{ ...fleetCoordinator, parentSessionId: "local-root" }, localRoot],
++    actorId: "fleet-coordinator", action: "send", targetId: "local-root",
++    expectedAllowed: false, expectedReasonOrCode: "POLICY_DENIED",
++  },
+ ];
+ 
+ export function stateForVector(vector: PolicyVector): PolicyState {
+   return { principals: Object.fromEntries(vector.principals.map((principal) => [principal.id, structuredClone(principal)])) };
+ }
+ 
+-export const POLICY_VECTOR_SCHEMA_VERSION = 2;
+-export const POLICY_SEMANTICS_HASH = "f3b00e503631bc91123aedfbcf1df72cc9913e1893c09728b2c598f3dcdfdfe0";
++export const POLICY_VECTOR_SCHEMA_VERSION = 3;
++// SHA-256 of JSON.stringify({schemaVersion, semanticsVersion, vectors}); asserted by the pi-build policy tests.
++export const POLICY_SEMANTICS_HASH = "2f0d4d2f4dcb775f3d7609e40ca68d29266993cd78194985b3e7a4458c50bb68";
+--- a/agent-intercom-pi/broker/access-registry.ts
++++ b/agent-intercom-pi/broker/access-registry.ts
+@@ -3,13 +3,13 @@
+ import { writeDurableJson } from "../durable-json.ts";
+ import { restrictIntercomRuntimeFile } from "./paths.ts";
+ 
+-export const REMOTE_ACCESS_STATE_VERSION = 2;
++export const REMOTE_ACCESS_STATE_VERSION = 3;
+ export const REMOTE_ACCESS_CREDENTIAL_VERSION = 1;
+ export const DEFAULT_ENROLLMENT_TTL_MS = 10 * 60 * 1000;
+ export const DEFAULT_PRINCIPAL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+ 
+ export type RemotePrincipalState = "active" | "revoked";
+-export type RemotePrincipalPolicy = "remote-tree";
++export type RemotePrincipalPolicy = "remote-tree" | "remote-fleet";
+ 
+ export interface RemotePrincipalRecord {
+   id: string;
+@@ -31,6 +31,7 @@
+ }
+ 
+ export interface EnrollmentTemplate {
++  policy?: RemotePrincipalPolicy;
+   name: string;
+   parentSessionId: string;
+   rootSessionId: string;
+@@ -42,6 +43,35 @@
+   maxChildren?: number;
+ }
+ 
++export interface FleetEnrollmentRequest {
++  fleet: string;
++  name: string;
++  remoteHostId: string;
++  expiresAt?: number;
++}
++
++export function fleetRootSessionId(fleet: string): string {
++  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(fleet)) throw new Error("Invalid fleet name");
++  return `fleet:${fleet}`;
++}
++
++function remotePolicy(value: unknown): RemotePrincipalPolicy {
++  if (value === undefined || value === "remote-tree") return "remote-tree";
++  if (value === "remote-fleet") return value;
++  throw new Error("Invalid remote principal policy");
++}
++
++function validateFleetGrant(template: EnrollmentTemplate): void {
++  if (template.policy !== "remote-fleet") return;
++  const root = template.rootSessionId;
++  if (
++    !/^fleet:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(root)
++    || template.parentSessionId !== root
++    || template.canDelegate !== false
++    || template.depth !== 1 || template.maxDepth !== 1 || template.maxChildren !== 0
++  ) throw new Error("Fleet coordinators require a nondelegating fleet grant");
++}
++
+ export interface ChildEnrollmentRequest {
+   name: string;
+   expiresAt?: number;
+@@ -126,7 +156,7 @@
+ function parseState(raw: unknown): RemoteAccessState {
+   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("expected object");
+   const state = raw as Record<string, unknown>;
+-  if (state.version !== 1 && state.version !== REMOTE_ACCESS_STATE_VERSION) throw new Error("unsupported version");
++  if (state.version !== 1 && state.version !== 2 && state.version !== REMOTE_ACCESS_STATE_VERSION) throw new Error("unsupported version");
+   if (typeof state.principals !== "object" || state.principals === null || Array.isArray(state.principals)) throw new Error("invalid principals");
+   if (typeof state.enrollments !== "object" || state.enrollments === null || Array.isArray(state.enrollments)) throw new Error("invalid enrollments");
+   if (state.adminCredentialHash !== undefined && typeof state.adminCredentialHash !== "string") throw new Error("invalid admin credential hash");
+@@ -152,12 +182,13 @@
+     const maxChildren = boundedInteger(principal.maxChildren as number | undefined, 0, "maximum child count", 0, 128);
+     principals[id] = {
+       ...(principal as unknown as RemotePrincipalRecord),
+-      policy: "remote-tree",
++      policy: remotePolicy(principal.policy),
+       canDelegate: principal.canDelegate === true,
+       depth,
+       maxDepth,
+       maxChildren,
+     };
++    validateFleetGrant(principals[id]);
+   }
+   const enrollments: Record<string, EnrollmentRecord> = {};
+   for (const [hash, value] of Object.entries(state.enrollments as Record<string, unknown>)) {
+@@ -170,12 +201,14 @@
+       ...enrollment,
+       template: {
+         ...template,
++        policy: remotePolicy(template.policy),
+         canDelegate: template.canDelegate === true,
+         depth,
+         maxDepth: boundedInteger(template.maxDepth, depth, "enrollment maximum depth", depth, 32),
+         maxChildren: boundedInteger(template.maxChildren, 0, "enrollment maximum children", 0, 128),
+       },
+     };
++    validateFleetGrant(enrollments[hash].template);
+   }
+   return {
+     version: REMOTE_ACCESS_STATE_VERSION,
+@@ -234,6 +267,7 @@
+     const canDelegate = template.canDelegate === true;
+     if (canDelegate && (maxDepth <= depth || maxChildren === 0)) throw new Error("Delegating principals require remaining depth and child capacity");
+     const normalized: EnrollmentTemplate = {
++      policy: remotePolicy(template.policy),
+       name: requireText(template.name, "principal name", 256),
+       parentSessionId: requireText(template.parentSessionId, "parent session ID"),
+       rootSessionId: requireText(template.rootSessionId, "root session ID"),
+@@ -244,10 +278,41 @@
+       maxDepth,
+       maxChildren,
+     };
++    validateFleetGrant(normalized);
+     this.pruneExpiredEnrollments(now);
+     this.state.enrollments[tokenHash] = { tokenHash, template: normalized, expiresAt, createdAt: now };
+     this.persist();
+     return { enrollmentToken, expiresAt };
++  }
++
++  issueFleetEnrollment(request: FleetEnrollmentRequest, ttlMs = DEFAULT_ENROLLMENT_TTL_MS): IssuedEnrollment {
++    const rootSessionId = fleetRootSessionId(request.fleet);
++    const host = requireText(request.remoteHostId, "remote host ID", 128);
++    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(host)) throw new Error("Invalid remote host label");
++    const name = requireText(request.name, "coordinator name", 256);
++    const qualifiedName = name.startsWith(`${host}/`) ? name : `${host}/${name}`;
++    if (request.expiresAt !== undefined && request.expiresAt > this.now() + DEFAULT_PRINCIPAL_TTL_MS) {
++      throw new Error("Fleet coordinator expiry exceeds the maximum lifetime");
++    }
++    return this.issueEnrollment({
++      policy: "remote-fleet",
++      name: qualifiedName,
++      remoteHostId: host,
++      parentSessionId: rootSessionId,
++      rootSessionId,
++      ...(request.expiresAt === undefined ? {} : { expiresAt: request.expiresAt }),
++      canDelegate: false,
++      depth: 1,
++      maxDepth: 1,
++      maxChildren: 0,
++    }, ttlMs);
++  }
++
++  inspectFleet(fleet: string): RemotePrincipalMetadata[] {
++    const rootSessionId = fleetRootSessionId(fleet);
++    return Object.values(this.state.principals)
++      .filter((principal) => principal.policy === "remote-fleet" && principal.rootSessionId === rootSessionId)
++      .map(({ credentialHash: _credentialHash, ...metadata }) => structuredClone(metadata));
+   }
+ 
+   issueChildEnrollment(
+@@ -309,7 +374,7 @@
+       rootSessionId: enrollment.template.rootSessionId,
+       remoteHostId: enrollment.template.remoteHostId,
+       generation: 1,
+-      policy: "remote-tree",
++      policy: remotePolicy(enrollment.template.policy),
+       canDelegate: enrollment.template.canDelegate === true,
+       depth: enrollment.template.depth!,
+       maxDepth: enrollment.template.maxDepth!,
+@@ -363,6 +428,9 @@
+   adoptSubtree(principalId: string, newParentSessionId: string, newRootSessionId: string): RemotePrincipalRecord[] {
+     const principal = this.state.principals[principalId];
+     if (!principal) throw new Error("Unknown adopted principal");
++    if (principal.policy === "remote-fleet" || this.state.principals[newParentSessionId]?.policy === "remote-fleet") {
++      throw new Error("Fleet grants cannot be adopted into delegation trees");
++    }
+     if (principalId === newParentSessionId) throw new Error("Adoption would create an ownership cycle");
+     let ancestor = this.state.principals[newParentSessionId];
+     const seen = new Set<string>();
+--- a/agent-intercom-pi/types.ts
++++ b/agent-intercom-pi/types.ts
+@@ -18,6 +18,8 @@
+   trustedLocal?: boolean;
+   origin?: "local" | "remote";
+   remoteHostId?: string;
++  /** Broker-owned coordinator grant; never accepted from SessionRegistration. */
++  remotePolicy?: "remote-tree" | "remote-fleet";
+   parentSessionId?: string;
+   rootSessionId?: string;
+   generation?: number;
+@@ -50,7 +52,7 @@
+ 
+ export type SessionRegistration = Omit<
+   SessionInfo,
+-  "id" | "peerUid" | "trustedLocal" | "origin" | "remoteHostId" | "parentSessionId" | "rootSessionId" | "generation" | "canDelegate" | "depth" | "maxDepth" | "maxChildren"
++  "id" | "peerUid" | "trustedLocal" | "origin" | "remoteHostId" | "remotePolicy" | "parentSessionId" | "rootSessionId" | "generation" | "canDelegate" | "depth" | "maxDepth" | "maxChildren"
+   | "boss"
+ > & {
+   /** Ephemeral identity shared only by reconnects from one live runtime. */
+@@ -91,7 +93,7 @@
+   rootSessionId: string;
+   remoteHostId: string;
+   generation: number;
+-  policy: "remote-tree";
++  policy: "remote-tree" | "remote-fleet";
+   canDelegate: boolean;
+   depth: number;
+   maxDepth: number;
+@@ -147,6 +149,8 @@
+   | { type: "health"; requestId: string; stateId?: string }
+   | { type: "register"; protocol: string; version: number; session: SessionRegistration; sessionId?: string; stateId?: string; access?: RemoteRegistrationAccess }
+   | { type: "access_control"; requestId: string; adminToken: string; action: "issue_enrollment"; enrollment: { name: string; parentSessionId: string; rootSessionId: string; remoteHostId: string; ttlMs?: number; expiresAt?: number; canDelegate?: boolean; maxDepth?: number; maxChildren?: number } }
++  | { type: "access_control"; requestId: string; adminToken: string; action: "issue_fleet_enrollment"; enrollment: { fleet: string; name: string; remoteHostId: string; ttlMs?: number; expiresAt?: number } }
++  | { type: "access_control"; requestId: string; adminToken: string; action: "inspect_fleet"; fleet: string }
+   | { type: "access_control"; requestId: string; adminToken: string; action: "revoke_subtree"; principalId: string }
+   | { type: "access_control"; requestId: string; adminToken: string; action: "inspect_tree"; principalId: string }
+   | { type: "access_control"; requestId: string; adminToken: string; action: "adopt_subtree"; principalId: string; newParentSessionId: string }
+@@ -164,7 +168,8 @@
+ export type BrokerMessage =
+   | { type: "health_ok"; requestId: string; protocol: string; version: number; endpoint: "local" | "remote"; capabilities?: BrokerCapabilityAdvertisement; remoteAccess?: RemoteAccessContract }
+   | { type: "registered"; sessionId: string; protocol: string; version: number; capabilities?: BrokerCapabilityAdvertisement; boss?: BossSessionMetadata; remoteAccess?: RemoteAccessContract; access?: RemoteAccessMetadata }
+-  | { type: "access_control_result"; requestId: string; action: "issue_enrollment"; enrollmentToken: string; expiresAt: number }
++  | { type: "access_control_result"; requestId: string; action: "issue_enrollment" | "issue_fleet_enrollment"; enrollmentToken: string; expiresAt: number }
++  | { type: "access_control_result"; requestId: string; action: "inspect_fleet"; principals: RemotePrincipalSummary[] }
+   | { type: "access_control_result"; requestId: string; action: "revoke_subtree"; changedPrincipalIds: string[] }
+   | { type: "access_control_result"; requestId: string; action: "inspect_tree"; principals: RemotePrincipalSummary[] }
+   | { type: "access_control_result"; requestId: string; action: "adopt_subtree"; principals: RemotePrincipalSummary[] }
+--- a/agent-intercom-pi/broker/authorization.ts
++++ b/agent-intercom-pi/broker/authorization.ts
+@@ -47,7 +47,7 @@
+       kind: "remote",
+       state: "active",
+       generation: session.generation,
+-      policy: "remote-tree",
++      policy: session.remotePolicy ?? "remote-tree",
+       parentSessionId: session.parentSessionId,
+       rootSessionId: session.rootSessionId,
+     };
+--- a/agent-intercom-pi/broker/broker.ts
++++ b/agent-intercom-pi/broker/broker.ts
+@@ -682,6 +682,7 @@
+           trustedLocal: false,
+           origin: "remote",
+           remoteHostId: remotePrincipal.remoteHostId,
++          remotePolicy: remotePrincipal.policy,
+           parentSessionId: remotePrincipal.parentSessionId,
+           rootSessionId: remotePrincipal.rootSessionId,
+           generation: remotePrincipal.generation,
+@@ -1167,6 +1168,61 @@
+       socket.end();
+       return;
+     }
++    if (message.action === "inspect_fleet") {
++      if (typeof message.fleet !== "string") {
++        this.sendError(socket, "INVALID_REQUEST", "Invalid fleet name");
++        socket.end();
++        return;
++      }
++      try {
++        const principals = this.accessRegistry.inspectFleet(message.fleet).map((principal) => this.principalSummary(principal));
++        writeMessage(socket, { type: "access_control_result", requestId: message.requestId, action: "inspect_fleet", principals });
++      } catch {
++        this.sendError(socket, "INVALID_REQUEST", "Invalid fleet name");
++      }
++      socket.end();
++      return;
++    }
++    if (message.action === "issue_fleet_enrollment") {
++      const enrollment = message.enrollment;
++      if (typeof enrollment !== "object" || enrollment === null || Array.isArray(enrollment)) {
++        this.sendError(socket, "INVALID_REQUEST", "Invalid fleet enrollment request");
++        socket.end();
++        return;
++      }
++      const fields = enrollment as Record<string, unknown>;
++      const allowed = new Set(["fleet", "name", "remoteHostId", "ttlMs", "expiresAt"]);
++      if (
++        Object.keys(fields).some((key) => !allowed.has(key))
++        || typeof fields.fleet !== "string" || typeof fields.name !== "string" || typeof fields.remoteHostId !== "string"
++        || (fields.ttlMs !== undefined && (typeof fields.ttlMs !== "number" || !Number.isSafeInteger(fields.ttlMs)))
++        || (fields.expiresAt !== undefined && (typeof fields.expiresAt !== "number" || !Number.isSafeInteger(fields.expiresAt)))
++      ) {
++        this.sendError(socket, "INVALID_REQUEST", "Invalid fleet enrollment request");
++        socket.end();
++        return;
++      }
++      try {
++        const issued = this.accessRegistry.issueFleetEnrollment({
++          fleet: fields.fleet,
++          name: fields.name,
++          remoteHostId: fields.remoteHostId,
++          ...(fields.expiresAt === undefined ? {} : { expiresAt: fields.expiresAt as number }),
++        }, fields.ttlMs as number | undefined);
++        this.audit.record({
++          event: "enrollment_issued", outcome: "allowed", actorId: "local-admin",
++          targetId: fields.name, remoteHostId: fields.remoteHostId, reason: `fleet:${fields.fleet}`,
++        });
++        writeMessage(socket, {
++          type: "access_control_result", requestId: message.requestId, action: "issue_fleet_enrollment",
++          enrollmentToken: issued.enrollmentToken, expiresAt: issued.expiresAt,
++        });
++      } catch {
++        this.sendError(socket, "INVALID_REQUEST", "Invalid fleet enrollment request");
++      }
++      socket.end();
++      return;
++    }
+     if (message.action === "inspect_tree") {
+       if (typeof message.principalId !== "string" || !isSessionId(message.principalId)) {
+         this.sendError(socket, "INVALID_REQUEST", "Invalid remote principal ID");
+@@ -1435,11 +1491,11 @@
+         kind: "remote",
+         state: record.state,
+         generation: record.generation,
+-        policy: "remote-tree",
++        policy: record.policy,
+         parentSessionId: record.parentSessionId,
+         rootSessionId: record.rootSessionId,
+       };
+-      if (!principals[record.rootSessionId]) {
++      if (record.policy === "remote-tree" && !principals[record.rootSessionId]) {
+         principals[record.rootSessionId] = {
+           id: record.rootSessionId,
+           kind: "local",

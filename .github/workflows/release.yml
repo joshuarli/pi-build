@@ -88,7 +88,7 @@ jobs:
           printf '%s\n' "$out" | sed -n 1p >> "$GITHUB_PATH"
           printf 'PYTHON=%s\n' "$(printf '%s\n' "$out" | sed -n 2p)" >> "$GITHUB_ENV"
       - name: Build twice and verify
-        run: make repro verify TARGET="${{ matrix.target }}" PROFILE="$PROFILE" PYTHON="$PYTHON"
+        run: make test-intercom repro verify TARGET="${{ matrix.target }}" PROFILE="$PROFILE" PYTHON="$PYTHON"
       - name: Require committed inputs unchanged
         run: git diff --exit-code -- locks sources patches
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
