@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /** Local administrator for explicitly enrolled tailnet coordinator sessions. */
 import { randomUUID } from "node:crypto";
-import { closeSync, constants, fstatSync, fsyncSync, mkdirSync, openSync, readSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, fsyncSync, mkdirSync, openSync, readSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
-import { dirname, isAbsolute, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createMessageReader, writeMessage } from "./framing.ts";
 import { getBrokerAdminCredentialFilePath, getBrokerSocketPath } from "./paths.ts";
 
@@ -162,7 +162,9 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// Node resolves symlinks for import.meta.url but not argv[1]; installed
+// runtimes are reached through the pi-runtime/current symlink.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error: unknown) => {
     process.stderr.write(`tailnet-admin: ${error instanceof Error ? error.message : "request failed"}\n`);
     process.exitCode = 1;

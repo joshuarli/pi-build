@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -153,8 +153,12 @@ function peer(path) {
   };
 }
 
+// Installed runtimes are reached through the pi-runtime/current symlink.
+const linkedPackages = join(mkdtempSync(join(tmpdir(), "ic-link-")), "current");
+symlinkSync(packages, linkedPackages, "dir");
+
 async function command(args, env) {
-  const child = spawn(process.execPath, [source("agent-intercom-pi", "broker/tailnet-admin.js"), ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [join(linkedPackages, "agent-intercom-pi/broker/tailnet-admin.js"), ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
