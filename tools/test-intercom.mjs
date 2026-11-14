@@ -19,7 +19,7 @@ function run(command, args, options = {}) {
 }
 
 try {
-  run(process.env.PYTHON || "python3", ["-I", "-X", "faulthandler", "tools/intercom.py", "prepare", packages]);
+  run(process.env.PYTHON || "python3", ["-I", "tools/intercom.py", "prepare", packages]);
   mkdirSync(compiler);
   mkdirSync(join(work, "home"));
   for (const name of ["package.json", "package-lock.json", ".npmrc"]) copyFileSync(join(root, "locks/core-build", name), join(compiler, name));
