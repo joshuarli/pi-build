@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.archive import archive, manifest_path, validate_members, verify
+from tools.archive import archive, validate_members, verify
 
 
 class ArchiveTests(unittest.TestCase):
@@ -25,7 +25,7 @@ class ArchiveTests(unittest.TestCase):
                 path.write_text(content)
             for profile in ("full", "headless-usr"):
                 output = root / f"{profile}.tar.xz"
-                manifest = archive(root / "input", output, f"pi-{profile}", "1.5.0", "aarch64-apple-darwin", profile, "abc123")
+                manifest = archive(root / "input", output, f"pi-{profile}", "1.5.0", "aarch64-apple-darwin", profile, "a" * 40)
                 expected = {name: content for name, content in files.items()
                             if profile == "full" or not name.endswith((".map", ".d.ts", ".d.mts", ".d.cts"))}
                 with tarfile.open(output) as bundle:
@@ -44,15 +44,16 @@ class ArchiveTests(unittest.TestCase):
             package = root / "input/node_modules/example"
             package.mkdir(parents=True)
             (package / "index.js").write_text("export default 1\n")
-            first = archive(root / "input", root / "first.tar.xz", "pi-full", "1.5.0", "aarch64-apple-darwin", "full", "abc123")
-            second = archive(root / "input", root / "second.tar.xz", "pi-full", "1.5.0", "aarch64-apple-darwin", "full", "abc123")
+            first = archive(root / "input", root / "first.tar.xz", "pi-full", "1.5.0", "aarch64-apple-darwin", "full", "a" * 40)
+            second = archive(root / "input", root / "second.tar.xz", "pi-full", "1.5.0", "aarch64-apple-darwin", "full", "a" * 40)
             self.assertEqual(first["sha256"], second["sha256"])
             self.assertEqual(first["packages"], {"example": len("export default 1\n")})
-            self.assertEqual(manifest_path(root / "first.tar.xz").name, "first.manifest.json")
-            self.assertEqual(verify(root / "first.tar.xz", root / "first.manifest.json", "aarch64-apple-darwin", "full")["sha256"], first["sha256"])
-            manifest = json.loads((root / "first.manifest.json").read_text())
+            manifest_file = root / "pi-full-1.5.0-aarch64-apple-darwin.manifest.json"
+            self.assertEqual(manifest_file.is_file(), True)
+            self.assertEqual(verify(root / "first.tar.xz", manifest_file, "aarch64-apple-darwin", "full")["sha256"], first["sha256"])
+            manifest = json.loads(manifest_file.read_text())
             self.assertEqual(manifest["schema_version"], 1)
-            self.assertEqual((manifest["product"], manifest["version"], manifest["source_revision"]), ("pi-full", "1.5.0", "abc123"))
+            self.assertEqual((manifest["product"], manifest["version"], manifest["source_revision"]), ("pi-full", "1.5.0", "a" * 40))
             self.assertEqual(manifest["sources_lock_sha256"], hashlib.sha256(Path("sources.lock.json").read_bytes()).hexdigest())
             manifest["target"] = "x86_64-unknown-linux-musl"
             (root / "bad.json").write_text(json.dumps(manifest))

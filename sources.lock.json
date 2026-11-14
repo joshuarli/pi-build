@@ -131,6 +131,16 @@
       "target": "aarch64-unknown-linux-musl",
       "license": "MIT",
       "purpose": "Alpine musl Node that runs the CLI and SDK loader checks on the extracted archive"
+    },
+    {
+      "name": "laputa-buildlib",
+      "version": "0.1.0",
+      "url": "https://pypi.17166969.xyz/current/wheels/laputa_buildlib-0.1.0-py3-none-any.whl",
+      "sha256": "edd102a1713c903f93e19b10036983d123dd76fa1b04a0e5f3c5070f00a95383",
+      "size": 23941,
+      "role": "library",
+      "license": "Apache-2.0",
+      "purpose": "Readers and validators for the build repository contract files, shared by the build repositories"
     }
   ]
 }

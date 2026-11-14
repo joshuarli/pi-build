@@ -6,7 +6,7 @@ Use the maintainer build to create deterministic, locked Pi runtime archives fro
 
 `TARGET` is a Rust target triple: `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, or `aarch64-unknown-linux-musl`.
 
-The build requires the Node.js, npm, Python, and jaq versions in `bootstrap.lock.json`. `sh tools/toolchain.sh TARGET` downloads them under `.work/toolchain/TARGET`, checks each digest in `sources.lock.json`, and prints the bin directory and Python path. It bootstraps jaq from the same lock when none is on `PATH`. Put that directory first on `PATH` and pass `PYTHON=` to `make`. `make prepare TARGET=aarch64-apple-darwin PROFILE=full` downloads production dependencies and writes the target package lock and local source-package tarballs under `locks/`. Run this command only when preparing or intentionally refreshing build inputs.
+The build requires the Node.js, npm, Python, and jaq versions in `bootstrap.lock.json`. `sh tools/toolchain.sh TARGET` downloads them under `.work/toolchain/TARGET`, verifies each pinned input with `laputa-buildlib` (hash-pinned in `sources.lock.json` and installed into the builder Python), and prints the bin directory and Python path. It bootstraps jaq from the same lock when none is on `PATH`. Put that directory first on `PATH` and pass `PYTHON=` to `make`. `make prepare TARGET=aarch64-apple-darwin PROFILE=full` downloads production dependencies and writes the target package lock and local source-package tarballs under `locks/`. Run this command only when preparing or intentionally refreshing build inputs.
 
 Build and verify with:
 

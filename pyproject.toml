@@ -3,7 +3,7 @@ name = "pi-build"
 version = "0.1.0"
 description = "Deterministic, locked Pi runtime archives built from preserved source snapshots"
 requires-python = ">=3.15"
-dependencies = []
+dependencies = ["laputa-buildlib==0.1.0"]
 
 [tool.pytest.ini_options]
 python_files = ["*_test.py", "test_*.py"]

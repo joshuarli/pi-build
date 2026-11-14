@@ -1,22 +1,32 @@
-import hashlib
 import json
-import lzma
 import posixpath
+import shutil
+import stat
 import tarfile
+import tempfile
 from pathlib import Path
+
+from buildlib.hashing import sha256_file
+from buildlib.release import build_manifest, create_archive, write_manifest
+
+HEADLESS_EXCLUSIONS = ("*.map", "*.d.ts", "*.d.mts", "*.d.cts")
 
 
 def digest(path):
-    value = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            value.update(chunk)
-    return value.hexdigest()
+    return sha256_file(Path(path))
 
 
-def manifest_path(archive_path):
-    path = Path(archive_path)
-    return path.with_name(path.name.removesuffix(".tar.xz") + ".manifest.json")
+def _inventory(root: Path) -> dict[str, int]:
+    inventory: dict[str, int] = {}
+    modules = root / "node_modules"
+    for path in modules.rglob("*"):
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            continue
+        parts = path.relative_to(modules).parts
+        package = "/".join(parts[:2]) if parts[0].startswith("@") else parts[0]
+        inventory[package] = inventory.get(package, 0) + metadata.st_size
+    return inventory
 
 
 def archive(source, output, product, version, target, profile, source_revision):
@@ -24,44 +34,33 @@ def archive(source, output, product, version, target, profile, source_revision):
         raise ValueError(f"unsupported profile: {profile}")
     root = Path(source)
     output = Path(output)
-    modules = root / "node_modules"
-    inventory = {}
-    with (
-        output.open("wb") as raw,
-        lzma.LZMAFile(raw, "wb", format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, preset=9) as compressed,
-        tarfile.open(fileobj=compressed, mode="w") as bundle,
-    ):
-        for path in sorted(modules.rglob("*"), key=lambda item: item.relative_to(modules).as_posix()):
-            relative = path.relative_to(modules).as_posix()
-            if profile == "headless-usr" and path.name.endswith((".map", ".d.ts", ".d.mts", ".d.cts")):
-                continue
-            info = bundle.gettarinfo(str(path), arcname="node_modules/" + relative)
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            info.mtime = 0
-            if info.isfile():
-                parts = path.relative_to(modules).parts
-                package = "/".join(parts[:2]) if parts[0].startswith("@") else parts[0]
-                inventory[package] = inventory.get(package, 0) + info.size
-                with path.open("rb") as stream:
-                    bundle.addfile(info, stream)
-            else:
-                bundle.addfile(info)
-    manifest = {
-        "schema_version": 1,
-        "product": product,
-        "version": version,
-        "target": target,
-        "profile": profile,
-        "source_revision": source_revision,
-        "sources_lock_sha256": digest(Path("sources.lock.json")),
-        "archive": output.name,
-        "sha256": digest(output),
-        "bytes": output.stat().st_size,
-        "source_manifest_sha256": digest(Path("sources/upstreams.json")),
-        "packages": inventory,
-    }
-    manifest_path(output).write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+    if profile == "headless-usr":
+        with tempfile.TemporaryDirectory(prefix="headless-usr-", dir=root.parent) as staging:
+            staged = Path(staging) / "root"
+            shutil.copytree(root, staged, symlinks=True, ignore=shutil.ignore_patterns(*HEADLESS_EXCLUSIONS))
+            return _assemble(staged, output, product, version, target, profile, source_revision)
+    return _assemble(root, output, product, version, target, profile, source_revision)
+
+
+def _assemble(root, output, product, version, target, profile, source_revision):
+    output.parent.mkdir(parents=True, exist_ok=True)
+    create_archive(root, output, mtime=0)
+    manifest = build_manifest(
+        product=product,
+        version=version,
+        target=target,
+        source_revision=source_revision,
+        sources_lock_sha256=sha256_file(Path("sources.lock.json")),
+        extra={
+            "archive": output.name,
+            "bytes": output.stat().st_size,
+            "packages": _inventory(root),
+            "profile": profile,
+            "sha256": sha256_file(output),
+            "source_manifest_sha256": sha256_file(Path("sources/upstreams.json")),
+        },
+    )
+    write_manifest(output.parent, manifest)
     return manifest
 
 

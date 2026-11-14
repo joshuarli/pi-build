@@ -24,7 +24,7 @@ pinned() { jaq -r --arg tool "$1" '.tools[$tool]' "$root/bootstrap.lock.json"; }
 case "$(uname -s):$(uname -m)" in Darwin:arm64) host=aarch64-apple-darwin ;; Linux:x86_64) host=x86_64-unknown-linux-musl ;; Linux:aarch64) host=aarch64-unknown-linux-musl ;; *) printf "unsupported build host\n" >&2; exit 2 ;; esac
 [[ "$target" == "$host" ]] || { printf "TARGET %s requires native host %s\n" "$target" "$target" >&2; exit 2; }
 "$PYTHON" -I "$root/tools/vendor.py" check
-"$PYTHON" -c 'from pathlib import Path; import shutil,sys; [shutil.rmtree(Path(p), ignore_errors=True) for p in sys.argv[1:]]' "$work/packages" "$work/runtime" "$work/tars" "$work/raw"
+"$PYTHON" -c 'from pathlib import Path; import shutil,sys; [shutil.rmtree(Path(p), ignore_errors=True) for p in sys.argv[1:]]' "$work/packages" "$work/runtime" "$work/tars" "$work/raw" "$work/archive-root"
 mkdir -p "$(dirname "$output")" "$work" "$work/home" "$work/npm-cache" "$work/packages" "$work/tars" "$work/raw" "$work/runtime" "$lockdir/tars"
 export HOME="$work/home" TMPDIR="$work/tmp" npm_config_cache="$work/npm-cache"
 mkdir -p "$TMPDIR"
@@ -105,7 +105,9 @@ if [[ "$profile" == headless-usr ]]; then
 fi
 node "$work/runtime/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" --version
 revision=$(git -C "$root" rev-parse HEAD)
-"$PYTHON" -I "$root/tools/archive.py" archive "$work/runtime" "$output" "$product" "$version" "$target" "$profile" "$revision" >/dev/null
+mkdir -p "$work/archive-root"
+mv "$work/runtime/node_modules" "$work/archive-root/node_modules"
+"$PYTHON" -I "$root/tools/archive.py" archive "$work/archive-root" "$output" "$product" "$version" "$target" "$profile" "$revision" >/dev/null
 provenance=$root/dist/$profile/provenance.json
 source_digest=$(shasum -a 256 "$root/sources/upstreams.json" | awk '{print $1}')
 patch_digest=$(shasum -a 256 "$root/patches/muse-offline-catalog.patch" | awk '{print $1}')
