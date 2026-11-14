@@ -89,6 +89,18 @@ inventory checks were also performed.
 
 ## Native build and release gate
 
+The tests compile the patched packages with the locked core-build TypeScript
+through the same `transpileModule` path as `headless-usr`; Node 26 provides only
+type stripping, and the upstream sources use parameter properties.
+
+On aarch64-apple-darwin with the pinned toolchain and real sockets,
+`make test-intercom` passed 31 of 31 with none skipped, and
+`make repro verify PROFILE=headless-usr` reproduced and verified the archive.
+The extracted `tailnet-admin.js --help` ran without npm, and all three
+companion bundles carry remote mode and policy semantics v3. An exported
+`NPM_CONFIG_REGISTRY` overrides the locks' `.npmrc` and makes npm refuse the
+locked tarball URLs; unset it for local builds.
+
 1. Check out the final implementation revision, install the pinned toolchain
    through the existing builder procedure, and run on a host with Unix sockets:
 

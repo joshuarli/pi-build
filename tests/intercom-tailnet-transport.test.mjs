@@ -1,19 +1,18 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { stripTypeScriptTypes } from "node:module";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { duplexPair } from "node:stream";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
-// Exercise the actual patched clients without npm, model calls, or a tailnet.
-// An integration build may supply an already prepared source package root.
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Exercise the actual patched clients without model calls or a tailnet. Run
+// through `make test-intercom`, which supplies the compiled patched packages.
+if (!process.env.INTERCOM_TEST_PACKAGES) throw new Error("INTERCOM_TEST_PACKAGES is required; run make test-intercom");
+const prepared = resolve(process.env.INTERCOM_TEST_PACKAGES);
 const temporary = mkdtempSync(join(tmpdir(), "ict-"));
 const packages = join(temporary, "packages");
 const names = ["pi", "claude", "codex", "opencode"];
@@ -51,31 +50,8 @@ after(() => {
 });
 
 for (const name of [...names, "core"]) {
-  const source = join(process.env.INTERCOM_TEST_PACKAGES || join(root, "sources"), `agent-intercom-${name}`);
-  cpSync(source, join(packages, `agent-intercom-${name}`), { recursive: true });
+  cpSync(join(prepared, `agent-intercom-${name}`), join(packages, `agent-intercom-${name}`), { recursive: true });
 }
-if (!process.env.INTERCOM_TEST_PACKAGES) {
-  for (const patch of ["intercom-tailnet-transport.patch", "intercom-tailnet-policy.patch"]) {
-    const path = join(root, "patches", patch);
-    if (existsSync(path)) execFileSync("patch", ["--batch", "--silent", "-p1", "-d", packages, "-i", path]);
-  }
-}
-
-function compile(directory, destination = directory) {
-  mkdirSync(destination, { recursive: true });
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name === "node_modules") continue;
-    const source = join(directory, entry.name);
-    if (entry.isDirectory()) compile(source, join(destination, entry.name));
-    else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
-      const javascript = stripTypeScriptTypes(readFileSync(source, "utf8"), { mode: "transform", sourceUrl: source })
-        .replace(/(from\s*["']|import\s*\(["'])([^"']+)\.ts(["'])/g, "$1$2.js$3");
-      writeFileSync(join(destination, entry.name.replace(/\.ts$/, ".js")), javascript);
-    }
-  }
-}
-for (const name of names) compile(join(packages, `agent-intercom-${name}`));
-compile(join(packages, "agent-intercom-core", "src"), join(packages, "agent-intercom-core", "dist"));
 mkdirSync(join(packages, "node_modules", "@dataforxyz"), { recursive: true });
 symlinkSync(join(packages, "agent-intercom-core"), join(packages, "node_modules", "@dataforxyz", "agent-intercom-core"), "dir");
 

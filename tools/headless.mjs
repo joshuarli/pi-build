@@ -9,7 +9,7 @@ const bedrockModules = [
   "@earendil-works/pi-coding-agent/dist/bundle/chunks/bedrock-converse-stream.js",
 ];
 
-function compilePackage(root, ts) {
+export function compilePackage(root, ts) {
   for (const entry of readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     const path = join(root, entry.name);
     if (entry.isDirectory()) {

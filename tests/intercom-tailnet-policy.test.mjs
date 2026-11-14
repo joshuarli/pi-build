@@ -2,24 +2,23 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-const packages = resolve(process.env.INTERCOM_PACKAGES_ROOT ?? process.env.INTERCOM_TEST_PACKAGES ?? ".work/intercom/packages");
-function source(pkg, relative) {
-  const path = join(packages, pkg, relative);
-  return existsSync(path) ? path : path.replace(/\.ts$/, ".js");
-}
+// Run through `make test-intercom`, which supplies the compiled patched packages.
+if (!process.env.INTERCOM_TEST_PACKAGES) throw new Error("INTERCOM_TEST_PACKAGES is required; run make test-intercom");
+const packages = resolve(process.env.INTERCOM_TEST_PACKAGES);
+const source = (pkg, relative) => join(packages, pkg, relative);
 const load = (pkg, path) => import(pathToFileURL(source(pkg, path)).href);
-const { authorize, POLICY_SEMANTICS_VERSION } = await load("agent-intercom-core", "src/policy.ts");
-const { POLICY_VECTORS, POLICY_VECTOR_SCHEMA_VERSION, POLICY_SEMANTICS_HASH, stateForVector } = await load("agent-intercom-core", "src/policy-vectors.ts");
-const { RemoteAccessRegistry } = await load("agent-intercom-pi", "broker/access-registry.ts");
-const { authorizeSessionAction, visibleSessions } = await load("agent-intercom-pi", "broker/authorization.ts");
-const { createMessageReader, writeMessage } = await load("agent-intercom-pi", "broker/framing.ts");
+const { authorize, POLICY_SEMANTICS_VERSION } = await load("agent-intercom-core", "dist/policy.js");
+const { POLICY_VECTORS, POLICY_VECTOR_SCHEMA_VERSION, POLICY_SEMANTICS_HASH, stateForVector } = await load("agent-intercom-core", "dist/policy-vectors.js");
+const { RemoteAccessRegistry } = await load("agent-intercom-pi", "broker/access-registry.js");
+const { authorizeSessionAction, visibleSessions } = await load("agent-intercom-pi", "broker/authorization.js");
+const { createMessageReader, writeMessage } = await load("agent-intercom-pi", "broker/framing.js");
 
 function scratch(t) {
   // Keep Unix-domain socket paths short even on macOS.
@@ -155,7 +154,7 @@ function peer(path) {
 }
 
 async function command(args, env) {
-  const child = spawn(process.execPath, ["--experimental-transform-types", source("agent-intercom-pi", "broker/tailnet-admin.ts"), ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [source("agent-intercom-pi", "broker/tailnet-admin.js"), ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
@@ -173,7 +172,7 @@ test("real broker enrolls coordinator peers through local-only administration an
   mkdirSync(intercom, { recursive: true, mode: 0o700 });
   const env = { ...process.env, PI_CODING_AGENT_DIR: agentDir };
   for (const key of ["AGENT_INTERCOM_REMOTE_ENDPOINT", "AGENT_INTERCOM_REMOTE_LISTEN", "AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH", "AGENT_INTERCOM_COORDINATOR"]) delete env[key];
-  const broker = spawn(process.execPath, ["--experimental-transform-types", source("agent-intercom-pi", "broker/broker.ts")], { env, stdio: ["ignore", "pipe", "pipe"] });
+  const broker = spawn(process.execPath, [source("agent-intercom-pi", "broker/broker.js")], { env, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   broker.stderr.on("data", (chunk) => { output += chunk; });
   t.after(async () => {
