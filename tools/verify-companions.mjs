@@ -50,6 +50,8 @@ try {
     if (pkg.name === "@dataforxyz/agent-intercom-opencode") {
       const plugin = join(pkgDir, "node_modules/@opencode-ai/plugin/dist/index.js");
       if (!existsSync(plugin)) throw new Error(`${archive}: @opencode-ai/plugin is not vendored`);
+      const core = join(pkgDir, "node_modules/@dataforxyz/agent-intercom-core/dist/index.js");
+      if (!existsSync(core)) throw new Error(`${archive}: @dataforxyz/agent-intercom-core is not vendored`);
     }
     console.log(`ok: ${pkg.name} ${version}`);
   }

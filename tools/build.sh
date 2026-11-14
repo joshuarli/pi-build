@@ -79,12 +79,28 @@ for companion in agent-intercom-claude agent-intercom-codex agent-intercom-openc
         (export npm_config_allow_remote=all; cd "$work/packages/$companion" && npm ci --ignore-scripts --no-audit --no-fund)
         # native optional accelerators of msgpackr-extract; msgpackr falls back to its JS path
         rm -rf "$work/packages/$companion/node_modules/@msgpackr-extract"
+        # The bundles import the shared broker core; upstream keeps it a dev/peer
+        # dependency and the git checkout ships no dist/ under --ignore-scripts.
+        # Ship the core build this script already produced for the runtime, and
+        # make it a production dependency so npm will bundle it (npm refuses to
+        # bundle dev and peer edges).
+        rm -rf "$work/packages/$companion/node_modules/@dataforxyz/agent-intercom-core" \
+            "$work/package"
+        tar -xzf "$work/tars/core.tgz" -C "$work"
+        mkdir -p "$work/packages/$companion/node_modules/@dataforxyz"
+        mv "$work/package" "$work/packages/$companion/node_modules/@dataforxyz/agent-intercom-core"
+        jaq '.packages["node_modules/@dataforxyz/agent-intercom-core"].dev = false' \
+            "$work/packages/$companion/node_modules/.package-lock.json" > "$work/core-hidden.lock"
+        mv "$work/core-hidden.lock" "$work/packages/$companion/node_modules/.package-lock.json"
     else
         (cd "$work/packages/$companion" && npm ci --ignore-scripts --no-audit --no-fund)
     fi
     (cd "$work/packages/$companion" && node scripts/build.mjs)
     if [[ "$companion" == agent-intercom-opencode ]]; then
-        jaq '.bundleDependencies = ["@opencode-ai/plugin"]' "$work/packages/$companion/package.json" > "$work/opencode-package.json"
+        jaq '.bundleDependencies = ["@opencode-ai/plugin", "@dataforxyz/agent-intercom-core"]
+           | .dependencies["@dataforxyz/agent-intercom-core"] = "0.1.0"
+           | del(.devDependencies["@dataforxyz/agent-intercom-core"])
+           | del(.peerDependencies)' "$work/packages/$companion/package.json" > "$work/opencode-package.json"
         cp "$work/opencode-package.json" "$work/packages/$companion/package.json"
     fi
     packed=$(cd "$work/packages/$companion" && npm pack --silent --ignore-scripts --pack-destination "$work/raw")
