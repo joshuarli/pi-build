@@ -16,6 +16,7 @@ try {
 const cwd = join(work, "cwd");
 const binDir = join(work, "bin");
 const museCalls = join(work, "muse-calls");
+const devinCalls = join(work, "devin-calls");
 const agentDir = join(work, "agent");
 const home = join(work, "home");
 mkdirSync(cwd, { recursive: true });
@@ -33,6 +34,17 @@ for (const name of ["npm", "npx"]) {
   symlinkSync(fakeMuse, path);
 }
 if (existsSync(museCalls)) unlinkSync(museCalls);
+const fakeDevin = join(binDir, "devin");
+writeFileSync(fakeDevin, '#!/bin/sh\nprintf called >> "' + devinCalls + '"\nexit 1\n');
+chmodSync(fakeDevin, 0o755);
+const devinCacheDir = join(home, ".cache/pi-devin");
+mkdirSync(devinCacheDir, { recursive: true });
+writeFileSync(join(devinCacheDir, "models.json"), JSON.stringify({
+  version: 1, fetchedAt: Date.now(), catalog: { families: [{
+    family_label: "SWE-2", family_uid: "swe-2", slug: "swe-2",
+    variants: [{ model_uid: "swe-2-medium", label: "SWE-2 Medium", max_context_tokens: 256000, max_output_tokens: 8192 }],
+  }] },
+}) + "\n");
 process.env.HOME = home;
 process.env.XDG_CONFIG_HOME = join(home, ".config");
 process.env.XDG_DATA_HOME = join(home, ".local/share");
@@ -58,6 +70,7 @@ const resourceLoader = new sdk.DefaultResourceLoader({
     extensionPath("pi-subagents"),
     extensionPath("@dataforxyz/agent-intercom-pi"),
     extensionPath("pi-muse-subscription"),
+    extensionPath("pi-devin-local"),
   ],
 });
 await resourceLoader.reload();
@@ -79,10 +92,15 @@ try {
   if (!ember || !spark) throw new Error("bundled Muse Ember and Spark models were not registered");
   if (ember.maxTokens !== 524_288 || ember.thinkingLevelMap.xhigh !== "xhigh")
     throw new Error("bundled Muse Ember limits or xhigh effort changed");
+  const devin = runtimeModels.getModel("devin", "swe-2");
+  if (!devin || devin.thinkingLevelMap?.medium !== "swe-2-medium" || devin.thinkingLevelMap?.max !== null)
+    throw new Error("Devin SWE-2 medium-only offline catalog did not register");
   await new Promise((resolve) => setTimeout(resolve, 250));
   if (existsSync(museCalls) && readFileSync(museCalls, "utf8").length)
     throw new Error("offline Muse session launched the Muse executable");
-  console.log(`ok: loaded and bound ${session.extensionRunner.extensions.length} Pi extensions; Muse Ember and Spark registered offline`);
+  if (existsSync(devinCalls) && readFileSync(devinCalls, "utf8").length)
+    throw new Error("offline Devin session launched the Devin executable");
+  console.log(`ok: loaded and bound ${session.extensionRunner.extensions.length} Pi extensions; Muse and Devin SWE-2 Medium registered offline`);
 } finally {
   await emitSessionShutdownEvent(session.extensionRunner, { type: "session_shutdown", reason: "quit" });
   session.dispose();

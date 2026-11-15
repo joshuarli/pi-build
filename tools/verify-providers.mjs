@@ -66,7 +66,7 @@ try {
   if (profile === "headless-usr") {
     for (const name of ["tsx", "esbuild", "@esbuild", "@aws-sdk", "@smithy", "@aws/lambda-invoke-store"])
       assert.equal(existsSync(join(modules, name)), false, `${name} must be absent`);
-    for (const name of ["pi-subagents", "@dataforxyz/agent-intercom-pi", "pi-muse-subscription"]) {
+    for (const name of ["pi-subagents", "@dataforxyz/agent-intercom-pi", "pi-muse-subscription", "pi-devin-local"]) {
       const root = join(modules, name);
       const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
       assert(manifest.pi.extensions.every((entry) => entry.endsWith(".js")));

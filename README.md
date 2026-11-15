@@ -24,7 +24,25 @@ The build requires a native runner for `TARGET`. A successful build on one targe
 
 `sources.lock.json` pins the toolchain downloads by URL and SHA-256. `bootstrap.lock.json` pins the toolchain versions that `tools/build.sh` asserts and lists the inputs each target installs. npm packages are pinned by the lockfiles under `locks/`, which resolve from the stuff registry (`https://npm.17166969.xyz/current/`) as set in each directory's `.npmrc`.
 
-`make build` uses the committed package locks and local source tarballs. It runs `npm ci` in an isolated work directory. It fails if source tarballs differ from the prepared inputs. `make verify` checks the archive manifest and digest, extracts the archive, starts the CLI, and loads and binds the subagents, intercom, and Muse extensions. Its Muse fixture confirms that offline startup registers the approved Ember and Spark models without launching `muse` for catalog refresh.
+`make build` uses the committed package locks and local source tarballs. It runs `npm ci` in an isolated work directory. It fails if source tarballs differ from the prepared inputs. `make verify` checks the archive manifest and digest, extracts the archive, starts the CLI, and loads and binds the subagents, intercom, Muse, and Devin extensions. Its Muse fixture confirms that offline startup registers the approved Ember and Spark models without launching `muse` for catalog refresh.
+
+## Devin SWE-2 (experimental)
+
+The MIT-licensed `mizorewww/pi-devin` provider is stored as a source snapshot
+(`sources/pi-devin-local`), hashed in `sources/upstreams.json`, and copied
+into the runtime after the locked npm install. It has no production npm
+packages; the build-time pinned TypeScript compiler emits `.js` modules for
+**both** runtime profiles. The official Devin CLI is **not** bundled, and the
+provider never obtains credentials during the build. `make verify` injects a
+synthetic offline SWE-2 catalog and checks that `devin/swe-2` exposes the
+`medium` variant without starting the CLI or making network calls.
+
+On the end-user host, first run `devin auth login` and `devin models list
+--format json`. An interactive Pi session should refresh the provider catalog;
+scoped workers use `PI_OFFLINE=1` and require the previously populated
+`~/.cache/pi-devin/models.json`. Live inference, account usage, token renewal,
+and model entitlement cannot be verified by the offline release test. The
+adapter speaks an unofficial protocol; pin and re-qualify it on every update.
 
 ## Read provenance
 
