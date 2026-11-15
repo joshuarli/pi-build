@@ -148,6 +148,10 @@ cp "$lockdir/.npmrc" "$work/runtime/.npmrc"
 mkdir -p "$work/runtime/tars"
 cp "$lockdir/tars/"*.tgz "$work/runtime/tars/"
 (cd "$work/runtime" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --install-strategy=hoisted)
+# Devin's provider has no production npm dependencies. Add the verified snapshot
+# after npm ci to preserve the existing per-target lockfiles and offline setup.
+cp -R "$work/packages/pi-devin-local" "$work/runtime/node_modules/pi-devin-local"
+node "$root/tools/compile-devin.mjs" "$work/runtime/node_modules/pi-devin-local" "$work/packages/agent-intercom-core/node_modules/typescript/lib/typescript.js"
 if [[ "$profile" == headless-usr ]]; then
     node "$root/tools/headless.mjs" "$work/runtime" "$work/packages/agent-intercom-core/node_modules/typescript/lib/typescript.js"
 fi
@@ -181,7 +185,7 @@ patch_digest=$(shasum -a 256 "$root/patches/muse-offline-catalog.patch" | awk '{
 trust_patch_digest=$(shasum -a 256 "$root/patches/muse-host-trust.patch" | awk '{print $1}')
 lock_digest=$(shasum -a 256 "$lockdir/package-lock.json" | awk '{print $1}')
 intercom_patch_digest=$("$PYTHON" -I "$root/tools/intercom.py" digest)
-builder_tools_digest=$(cat "$root/tools/build.sh" "$root/tools/pack.py" "$root/tools/archive.py" "$root/tools/headless.mjs" "$root/tools/intercom.py" | shasum -a 256 | awk '{print $1}')
+builder_tools_digest=$(cat "$root/tools/build.sh" "$root/tools/pack.py" "$root/tools/archive.py" "$root/tools/headless.mjs" "$root/tools/compile-devin.mjs" "$root/tools/intercom.py" | shasum -a 256 | awk '{print $1}')
 node_version=$(node --version)
 npm_version=$(npm --version)
 python_version=$("$PYTHON" --version)
@@ -194,12 +198,12 @@ if [[ -f "$provenance" ]] && ! jaq -e --arg revision "$revision" --arg profile "
     "$PYTHON" -c 'from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True)' "$provenance"
 fi
 if [[ ! -f "$provenance" ]]; then
-    jaq -n --arg product "$product" --arg version "$version" '{schema:1,product:$product,version:$version,targets:{},inputs:{},components:{pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built+patch",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed+patch",muse_adapter:"source-snapshot-packed+patch"}}' > "$provenance"
+    jaq -n --arg product "$product" --arg version "$version" '{schema:1,product:$product,version:$version,targets:{},inputs:{},components:{pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built+patch",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed+patch",muse_adapter:"source-snapshot-packed+patch",devin_adapter:"source-snapshot-compiled"}}' > "$provenance"
 fi
 tmp=$provenance.tmp
 jaq --arg revision "$revision" --arg product "$product" --arg version "$version" --arg source "$source_digest" --arg patch "$patch_digest" --arg target "$target" --arg profile "$profile" --arg archive "$(basename "$output")" --arg sha "$archive_sha" \
     --arg lock "$lock_digest" --arg core "$core_lock_digest" --arg tools "$builder_tools_digest" --arg node "$node_version" --arg npm "$npm_version" --arg python "$python_version" --arg jaq "$jaq_version" --arg zlib "$zlib_version" --arg trust "$trust_patch_digest" --arg intercom "$intercom_patch_digest" --argjson bytes "$archive_bytes" --argjson companions "$companions_json" \
-    '.companions=$companions | .builder_revision=$revision | .profile=$profile | .product=$product | .version=$version | .sources_sha256=$source | .components //= {pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built+patch",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed+patch",muse_adapter:"source-snapshot-packed+patch"} | .components.pi_subagents=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.intercom_pi=(if $profile == "headless-usr" then "source-snapshot-packed+patch+compiled" else "source-snapshot-packed+patch" end) | .components.muse_adapter=(if $profile == "headless-usr" then "source-snapshot-packed+patch+compiled" else "source-snapshot-packed+patch" end) | .components.pi_ai=(if $profile == "headless-usr" then "verified-precompiled-registry-package+bedrock-disabled" else "verified-precompiled-registry-package" end) | .targets[$target]={target:$target,profile:$profile,archive:$archive,sha256:$sha,bytes:$bytes} | .inputs[$target]={lock_sha256:$lock,core_build_lock_sha256:$core,builder_tools_sha256:$tools,patches:{muse_offline_catalog_sha256:$patch,muse_host_trust_sha256:$trust,intercom_tailnet_sha256:$intercom},toolchain:{node:$node,npm:$npm,python:$python,jaq:$jaq,zlib:$zlib},companions:$companions}' \
+    '.companions=$companions | .builder_revision=$revision | .profile=$profile | .product=$product | .version=$version | .sources_sha256=$source | .components //= {pi_coding_agent:"verified-precompiled-registry-package",intercom_core:"source-built+patch",pi_subagents:"source-snapshot-packed",intercom_pi:"source-snapshot-packed+patch",muse_adapter:"source-snapshot-packed+patch",devin_adapter:"source-snapshot-compiled"} | .components.pi_subagents=(if $profile == "headless-usr" then "source-snapshot-packed+compiled" else "source-snapshot-packed" end) | .components.intercom_pi=(if $profile == "headless-usr" then "source-snapshot-packed+patch+compiled" else "source-snapshot-packed+patch" end) | .components.muse_adapter=(if $profile == "headless-usr" then "source-snapshot-packed+patch+compiled" else "source-snapshot-packed+patch" end) | .components.pi_ai=(if $profile == "headless-usr" then "verified-precompiled-registry-package+bedrock-disabled" else "verified-precompiled-registry-package" end) | .targets[$target]={target:$target,profile:$profile,archive:$archive,sha256:$sha,bytes:$bytes} | .inputs[$target]={lock_sha256:$lock,core_build_lock_sha256:$core,builder_tools_sha256:$tools,patches:{muse_offline_catalog_sha256:$patch,muse_host_trust_sha256:$trust,intercom_tailnet_sha256:$intercom},toolchain:{node:$node,npm:$npm,python:$python,jaq:$jaq,zlib:$zlib},companions:$companions}' \
     "$provenance" > "$tmp"
 mv "$tmp" "$provenance"
 (cd "$(dirname "$output")" && : > SHA256SUMS && for artifact in *.tar.xz *.tgz; do
