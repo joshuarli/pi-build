@@ -158,22 +158,22 @@ function registration() {
 for (const adapter of adapters) {
   test(`${adapter.name}: local defaults and explicit remote endpoint validation`, () => {
     const { getBrokerConnectTarget, getRemoteBrokerListenTarget } = adapter.paths;
-    assert.equal(getBrokerConnectTarget("linux", { PI_CODING_AGENT_DIR: join(temporary, "agent") }), join(temporary, "agent", "intercom", "broker.sock"));
+    assert.equal(getBrokerConnectTarget({ PI_CODING_AGENT_DIR: join(temporary, "agent") }), join(temporary, "agent", "intercom", "broker.sock"));
     const path = credential(adapter.name);
     for (const address of ["100.64.0.1", "100.127.255.254", "[fd7a:115c:a1e0::1]"]) {
-      const target = getBrokerConnectTarget("linux", remoteEnvironment(`tcp://${address}:4321`, path));
+      const target = getBrokerConnectTarget(remoteEnvironment(`tcp://${address}:4321`, path));
       assert.equal(target.port, 4321);
       assert.equal(target.transport, "tcp");
     }
     const socketPath = join(temporary, "gateway.sock");
-    assert.equal(getBrokerConnectTarget("darwin", remoteEnvironment(`unix://${socketPath}`, path)), socketPath);
+    assert.equal(getBrokerConnectTarget(remoteEnvironment(`unix://${socketPath}`, path)), socketPath);
     for (const endpoint of ["", "tcp://0.0.0.0:4321", "tcp://127.0.0.1:4321", "tcp://100.63.0.1:4321", "tcp://100.128.0.1:4321", "tcp://example.ts.net:4321", "tcp://[::]:4321", "tcp://[fd7a:115c:a1e1::1]:4321", "tcp://100.64.0.1:0", "tcp://100.64.0.1:65536", "tcp://100.64.0.1:4321/path", "tcp://user:pass@100.64.0.1:4321", "tcp://100.64.0.1:4321?x=y", "unix://host/tmp/socket", "unix:///tmp/socket%00", "unix:///tmp/socket#fragment"]) {
-      assert.throws(() => getBrokerConnectTarget("linux", remoteEnvironment(endpoint, path)), undefined, endpoint);
+      assert.throws(() => getBrokerConnectTarget(remoteEnvironment(endpoint, path)), undefined, endpoint);
       assert.throws(() => getRemoteBrokerListenTarget({ AGENT_INTERCOM_REMOTE_LISTEN: endpoint }), undefined, endpoint);
     }
-    assert.throws(() => getBrokerConnectTarget("linux", { AGENT_INTERCOM_REMOTE_ENDPOINT: `unix://${socketPath}` }), /requires an absolute/);
-    assert.throws(() => getBrokerConnectTarget("linux", remoteEnvironment(`unix://${socketPath}`, "relative.json")), /requires an absolute/);
-    assert.throws(() => getBrokerConnectTarget("linux", { AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH: path }), /refusing local fallback/);
+    assert.throws(() => getBrokerConnectTarget({ AGENT_INTERCOM_REMOTE_ENDPOINT: `unix://${socketPath}` }), /requires an absolute/);
+    assert.throws(() => getBrokerConnectTarget(remoteEnvironment(`unix://${socketPath}`, "relative.json")), /requires an absolute/);
+    assert.throws(() => getBrokerConnectTarget({ AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH: path }), /refusing local fallback/);
     assert.throws(() => getRemoteBrokerListenTarget({ ...remoteEnvironment(`unix://${socketPath}`, path), AGENT_INTERCOM_REMOTE_LISTEN: "tcp://100.64.0.1:4321" }), /cannot be enabled/);
   });
 

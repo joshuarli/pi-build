@@ -122,7 +122,6 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     process.stdout.write(HELP);
     return;
   }
-  if (process.platform === "win32") throw new Error("Tailnet coordinator administration requires macOS or Linux");
   if (command === "inspect") {
     const result = await request("inspect_fleet", { fleet: required(options, "fleet") });
     process.stdout.write(`${JSON.stringify(result.principals, null, 2)}\n`);

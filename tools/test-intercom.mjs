@@ -20,6 +20,8 @@ function run(command, args, options = {}) {
 
 try {
   run(process.env.PYTHON || "python3", ["-I", "tools/intercom.py", "prepare", packages]);
+  run("patch", ["-s", "--batch", "--forward", "--fuzz=0", "-p1", "-i", join(root, "patches", "drop-windows.patch")],
+    { cwd: packages });
   mkdirSync(compiler);
   mkdirSync(join(work, "home"));
   for (const name of ["package.json", "package-lock.json", ".npmrc"]) copyFileSync(join(root, "locks/core-build", name), join(compiler, name));
