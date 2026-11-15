@@ -654,6 +654,32 @@
         "tsconfig.json": "ded216dc66532fcc32baba90fa7b958ab8b5735e",
         "types.ts": "75f6d980e61babc373666fcb515e5e2dd40e3c9c"
       }
+    },
+    "pi-devin-local": {
+      "repository": "mizorewww/pi-devin",
+      "sha": "b07e80f12362a52c02162d790e0f183c5b532641",
+      "ref": "main",
+      "version": "0.4.2",
+      "path": "sources/pi-devin-local",
+      "files": {
+        "LICENSE": "0f1488ca0b7fbfb7cde8ef87b9533302dfb6060d",
+        "README.md": "725de6461ef1aeb1c9c9f768aee194af23fd29e9",
+        "extensions/index.ts": "c4190741f0f61093bbbeff556b78d390b233aebe",
+        "package.json": "c293bdc4d0d6774078f7ceca90e265d2e7e90547",
+        "src/catalog-cache.ts": "61e8be14ef7f0fa36bc56a755f1d77445c40e0a8",
+        "src/cli.ts": "df448ff8eda1d7db0a91e9c52b0dd64db16ea86b",
+        "src/context-map.ts": "b98b1517dfc0d08d796c19bf60fa96db193a0498",
+        "src/credentials.ts": "0871209d77ccd35c2545d653a7c27fe51b986a2b",
+        "src/desktop-auth.ts": "5901c80bef5fd8586c16976b312e154f70fbcb19",
+        "src/metadata.ts": "3728173b2820da1410077b527107a675616cb1c4",
+        "src/model-configs.ts": "4433408ea27e6667ba04758c062000f82c9163bd",
+        "src/models.ts": "0299b84dfd4e84d3ede7b30c9184827b592943ae",
+        "src/stream.ts": "e998b7ba8e7702baac3563a726c09171a347d723",
+        "src/thinking.ts": "13f1e3dcb3fc323fe4c49934bbcaf11da0bfb979",
+        "src/wire.ts": "0c8920505464445a65ec6a455ec5ee7cbd0ecd66",
+        "test-runner.mjs": "6b25dfe97a53d01fb9a2b3cee994bacc12a2c9da",
+        "tsconfig.json": "a70c37aab2a6f4c5a045096404616fa3a08485f3"
+      }
     }
   },
   "tracked_only": {
