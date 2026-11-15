@@ -22,7 +22,7 @@ OTHER = re.compile(r"^(src/|broker/|ui/|provider/|skills/|index\.ts$|.*\.ts$|.*\
 COMPANIONS = re.compile(r".*")
 SHA = re.compile(r"[0-9a-f]{40}")
 SUPPORTED = {"pi-subagents", "agent-intercom-pi", "agent-intercom-core", "pi-muse-subscription",
-             "agent-intercom-claude", "agent-intercom-codex", "agent-intercom-opencode"}
+             "agent-intercom-claude", "agent-intercom-codex", "agent-intercom-opencode", "pi-devin-local"}
 
 
 def source_files(folder: Path, name: str) -> list[Path]:

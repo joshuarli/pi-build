@@ -1,0 +1,63 @@
+{
+  "name": "pi-devin-local",
+  "version": "0.4.2",
+  "description": "Devin Local models in Pi — SWE-2, Opus 5, Fable 5, Sol and friends, with auth and the live model catalog coming from the local Devin CLI.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "devin",
+    "devin-local",
+    "cognition",
+    "swe-2",
+    "custom-provider"
+  ],
+  "author": "Kashyab Ambarani",
+  "contributors": [
+    "mizorewww"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mizorewww/pi-devin.git"
+  },
+  "homepage": "https://github.com/mizorewww/pi-devin#readme",
+  "bugs": {
+    "url": "https://github.com/mizorewww/pi-devin/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "files": [
+    "extensions/",
+    "src/",
+    "README.md",
+    "README_zh.md",
+    "AGENTS.md",
+    "LICENSE",
+    "docs/"
+  ],
+  "scripts": {
+    "test": "node test-runner.mjs",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.86.0",
+    "@earendil-works/pi-coding-agent": ">=0.86.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
