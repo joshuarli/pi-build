@@ -26,6 +26,8 @@ The build requires a native runner for `TARGET`. A successful build on one targe
 
 `make build` uses the committed package locks and local source tarballs. It runs `npm ci` in an isolated work directory. It fails if source tarballs differ from the prepared inputs. `make verify` checks the archive manifest and digest, extracts the archive, starts the CLI, and loads and binds the subagents, intercom, Muse, and Devin extensions. Its Muse fixture confirms that offline startup registers the approved Ember and Spark models without launching `muse` for catalog refresh.
 
+The shipped `pi --help` includes the command reference and examples. The build applies `overlays/pi-cli/help.mjs` to the locked Pi package with `tools/patch-pi-help.mjs`; `make verify` checks the packaged help offline with `tests/pi-help.test.mjs`.
+
 ## Devin SWE-2 (experimental)
 
 The MIT-licensed `mizorewww/pi-devin` provider is stored as a source snapshot

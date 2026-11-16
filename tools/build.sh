@@ -149,6 +149,7 @@ cp "$lockdir/.npmrc" "$work/runtime/.npmrc"
 mkdir -p "$work/runtime/tars"
 cp "$lockdir/tars/"*.tgz "$work/runtime/tars/"
 (cd "$work/runtime" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --install-strategy=hoisted)
+node "$root/tools/patch-pi-help.mjs" "$work/runtime/node_modules/@earendil-works/pi-coding-agent"
 # Devin's provider has no production npm dependencies. Add the verified snapshot
 # after npm ci to preserve the existing per-target lockfiles and offline setup.
 cp -R "$work/packages/pi-devin-local" "$work/runtime/node_modules/pi-devin-local"

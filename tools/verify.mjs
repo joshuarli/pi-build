@@ -1,10 +1,12 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const runtime = process.argv[2];
 if (!runtime) throw new Error("usage: node tools/verify.mjs EXTRACTED_ROOT");
 const modules = join(runtime, "node_modules");
+execFileSync(process.execPath, ["tests/pi-help.test.mjs", join(modules, "@earendil-works/pi-coding-agent")], { stdio: "inherit" });
 function extensionPath(name) {
   const pkg = JSON.parse(readFileSync(join(modules, name, "package.json"), "utf8"));
   return join(modules, name, pkg.pi.extensions[0]);
