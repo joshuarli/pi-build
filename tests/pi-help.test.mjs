@@ -32,7 +32,10 @@ try {
   const top = run(['--help']);
   assert.equal(top.status, 0, top.stderr);
   assert.equal(top.stderr, '');
-  assert.equal(run(['-h']).stdout, top.stdout);
+  const shortHelp = run(['-h']);
+  assert.equal(shortHelp.status, 0, shortHelp.stderr);
+  assert.equal(shortHelp.stderr, '');
+  assert.equal(shortHelp.stdout, top.stdout);
   const colored = spawnSync(process.execPath, [cli, '--help'], { encoding: 'utf8', env: { ...env, FORCE_COLOR: '1', NO_COLOR: '' }, cwd: tmp });
   assert.equal(colored.status, 0, colored.stderr);
   assert.equal((colored.stdout.match(/^Examples:$/gm) ?? []).length, 1);
