@@ -1,0 +1,20 @@
+import { copyFile, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const bundle = join(process.argv[2], 'dist/bundle');
+const entry = join(bundle, 'cli.js');
+const runtime = await readFile(join(bundle, 'cli-runtime.js'), 'utf8');
+const chunk = runtime.match(/import\{configureHttpDispatcher,main\}from"(\.\/chunks\/chunk-[A-Z0-9]+\.js)"/);
+if (!chunk) throw new Error('unrecognized pi runtime entry');
+const chunkPath = join(bundle, chunk[1]);
+const source = await readFile(chunkPath, 'utf8');
+const marker = ',main};';
+if (source.split(marker).length !== 2) throw new Error('unrecognized pi runtime exports');
+await writeFile(chunkPath, source.replace(marker, ',printHelp,main};'));
+const original = await readFile(entry, 'utf8');
+const start = 'enableCompileCache();\ncreateRequire(import.meta.url)("./cli-runtime.js");';
+if (!original.includes(start)) throw new Error('unrecognized pi CLI entry');
+await copyFile(join(root, 'overlays/pi-cli/help.mjs'), join(bundle, 'owned-help.mjs'));
+await writeFile(entry, original.replace(start, `enableCompileCache();\nconst { help } = await import("./owned-help.mjs");\nconst { printHelp, parseArgs } = await import("${chunk[1]}");\nif (!help(process.argv.slice(2), printHelp, parseArgs)) createRequire(import.meta.url)("./cli-runtime.js");`));
