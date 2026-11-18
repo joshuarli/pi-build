@@ -124,6 +124,44 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "manifest differs from provenance for aarch64-apple-darwin"):
             merge(self.assets, parts)
 
+    def test_rejects_archive_size_or_digest_mismatch_independently(self):
+        for field in ("bytes", "sha256"):
+            with self.subTest(field=field):
+                parts = [part(self.assets, target) for target in TARGETS]
+                record = parts[0]["targets"][TARGETS[0]]
+                record[field] = 1 if field == "bytes" else "0" * 64
+                with self.assertRaisesRegex(ValueError, "archive digest or size mismatch"):
+                    merge(self.assets, parts)
+
+    def test_rejects_symlinked_target_assets(self):
+        for suffix in ("tar.xz", "manifest.json"):
+            with self.subTest(suffix=suffix):
+                parts = [part(self.assets, target) for target in TARGETS]
+                path = self.assets / f"pi-full-1.5.0-{TARGETS[0]}.{suffix}"
+                original = path.with_name(f"original-{suffix}")
+                path.rename(original)
+                path.symlink_to(original.name)
+                with self.assertRaisesRegex(ValueError, "missing (archive|manifest)"):
+                    merge(self.assets, parts)
+                path.unlink()
+                original.unlink()
+
+    def test_rejects_invalid_companion_metadata(self):
+        for field, value in (("archive", 1), ("version", 1), ("extra", "x"), ("bytes", True)):
+            with self.subTest(field=field):
+                parts = [part(self.assets, target) for target in TARGETS]
+                for item in parts:
+                    item["companions"]["agent-intercom-claude"][field] = value
+                with self.assertRaisesRegex(ValueError, "invalid companion (record|size)"):
+                    merge(self.assets, parts)
+
+    def test_rejects_missing_companion_kind(self):
+        parts = [part(self.assets, target) for target in TARGETS]
+        for item in parts:
+            del item["companions"]["agent-intercom-claude"]
+        with self.assertRaisesRegex(ValueError, "release requires companions"):
+            merge(self.assets, parts)
+
     def test_rejects_target_record_with_extra_identity_fields(self):
         parts = [part(self.assets, target) for target in TARGETS]
         parts[0]["targets"]["aarch64-apple-darwin"]["builder_revision"] = REVISION
