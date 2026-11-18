@@ -25,6 +25,8 @@ dev = [
 [tool.coverage.run]
 source = ["tools"]
 branch = true
+parallel = true
+patch = ["subprocess"]
 data_file = ".work/tmp/coverage/.coverage"
 
 [tool.ruff]

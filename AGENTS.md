@@ -7,7 +7,7 @@
 - `tests/archive_test.py` exercises archive contents, reproducibility, manifest identity, and path validation for the extracted runtime and `make verify`.
 - `tests/release_test.py` checks provenance, checksums, target, and profile identity for the release workflow and usr installer.
 - `tests/vendor_test.py` checks snapshot integrity and materialization for `tools/build.sh` and packaging.
-- The Python suite calls functions directly. CLI flags and exits, fetch, toolchain setup, packing, building, sizes, intercom overlays, and update/plan commands have no direct tests in that suite.
+- The Python suite calls archive and vendor functions directly and runs the isolated pack and size commands. Coverage combines the parent and child data. Fetch, toolchain setup, native building, intercom overlays, and vendor update and plan still need their own checks.
 - The Python coverage report covers all seven tracked `tools/*.py` files, including unimported files. It is informational, not a gate; coverage does not establish assertion strength.
 - `make test-intercom` compiles patched sources and exercises the broker and client policy and transport. It can require npm and sockets.
 - `make verify` exercises an existing archive, packaged CLI and help, extensions, providers, and companions. `make repro` rebuilds and compares artifacts. See [intercom verification](docs/verification/intercom-tailnet.md) for the two-host procedure.
