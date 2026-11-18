@@ -176,6 +176,32 @@ make test
 make lint
 ```
 
+Extraction tests at `e4c22d212c5663eeb7d9ad64c67ce90b3f19973b`
+selected the same 85 validator and unpack identities in fresh macOS seals.
+The original tests caught 37, missed 36 and exercised none of the 12 unpack
+identities. The candidate caught 73 and missed 12. All 12 unpack identities
+were caught. The remaining validator IDs are 30–33, 41, 43, 45–49 and 67.
+The production archive code is identical in both seals.
+
+The intended XZ archive is extracted by the real tarfile reader. The test
+checks the extracted byte and link inventory as well as the member selection
+and data filter. Invalid metadata stays in in-memory validator fixtures
+except for a benign duplicate member that must fail before extraction.
+The compression boundary rejects a gzip fixture before creating a destination.
+Changing `tarfile.open(source, "r:xz")` to `tarfile.open(source, "r:*")`
+in a separate scratch copy made the focused compression test fail with
+`ReadError not raised`. All 35 ordinary tests and Ruff and ty passed.
+
+Use the preceding archive mutation recipe with this base and the tracked
+`sources.lock.json` and `sources/upstreams.json` in place of the fixture JSON.
+Add `also_copy = ["sources.lock.json", "sources/upstreams.json"]` to the
+`[tool.mutmut]` config. Select
+`tools.archive.x_validate_members__mutmut_*` and
+`tools.archive.x_unpack__mutmut_*`, and compare the selected
+`exit_code_by_key` maps in `mutants/tools/archive.py.meta`. Both commands
+exited zero under the same 120-second bound. Remaining archive validator
+identities, vendor, artifact build and live providers remain open.
+
 ## Tickets
 
 
