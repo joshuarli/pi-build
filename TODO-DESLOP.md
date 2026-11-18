@@ -11,6 +11,8 @@ Diagnose (DSLP-2) reviewed first-party `tools/`, packaging metadata, and their t
 
 Types (DSLP-3) at `0c5b3c3057e73d89099dc2beea82711b1c8e876b`: ty 0.0.101 reports 10 `missing-type-argument` diagnostics, split into release and vendor boundary work below. `unsound-return-statement`, `unused-ignore-comment`, and Ruff 0.17.4 `ANN401` each report zero. No setting was adopted: the former remains blocked on sound contracts and the others have no qualifying witness. Other candidates remain unmeasured. The Python escape-hatch search in `tools/` and `tests/` found zero matches before and after; no typing changes were made.
 
+Release types (DSLP-7) at base `e28f70241025b396fab6d2fc78a0ee62a1bd71a2`: `uv run --locked ty check --error missing-type-argument tools tests` fell from 10 diagnostics (5 release, 5 vendor) to 5 (all vendor). No checker setting was adopted. A negative checker witness appended temporarily to `tests/release_test.py`, `from tools.release import TargetRecord` followed by `def type_witness(record: TargetRecord) -> None: record["archive"] = 1`, produced exactly one `invalid-assignment` diagnostic under `uv run --locked ty check tests/release_test.py`. The witness was removed after the probe; no ignore was added. Opaque nested input metadata serializes identically on the base and candidate. The sealed numeric archive and product fixtures fail on the base with `unexpected archive name` and pass with explicit identity validation; disabling the target guard makes its fixture fail again. The malformed identity error path changes; supported producer formats and fixture output remain unchanged. Release builds and external installer execution were not run.
+
 ## Tickets
 
 
@@ -42,14 +44,6 @@ Types (DSLP-3) at `0c5b3c3057e73d89099dc2beea82711b1c8e876b`: ty 0.0.101 reports
 - **Effort:** M
 
 
-### DSLP-7 · P2 · Types: establish the release provenance contract
-
-- **Area:** deslop · types · release
-- **Where:** tools/release.py:24; tools/build.sh:165; tests/release_test.py:43
-- **Problem:** merge and write use bare dict annotations while merge reads decoded provenance and preserves shared values and inputs without establishing their full shape; the build produces nested inputs, while tests use smaller input records. Five missing-type-argument diagnostics include the test producers. A TypedDict fed by json.loads would assert an unchecked contract.
-- **Recommendation:** Trace accepted provenance and buildlib consumers, preserve existing formats and accepted inputs, then establish a sound boundary and a negative checker witness. Any malformed-data behavior change needs a sealed fail-before fixture and separate commit. Run make test, make lint and ty with missing-type-argument enabled.
-- **Fix with:** typing-audit
-- **Effort:** M
 
 
 ### DSLP-8 · P2 · Types: establish the vendor manifest contract

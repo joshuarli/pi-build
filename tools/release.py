@@ -8,7 +8,9 @@ already be in ASSET_DIR with the recorded digest and size.
 import json
 import sys
 import tarfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TypedDict, TypeGuard
 
 from buildlib.hashing import sha256_file
 from buildlib.release import write_sha256sums
@@ -21,27 +23,74 @@ COMPANIONS = ("agent-intercom-claude", "agent-intercom-codex", "agent-intercom-o
 digest = sha256_file
 
 
-def merge(assets: Path, parts: list[dict]) -> dict:
+class TargetRecord(TypedDict):
+    target: str
+    profile: str
+    archive: str
+    sha256: str
+    bytes: int
+
+
+class Release(TypedDict):
+    schema: object
+    builder_revision: str
+    profile: str
+    product: str
+    version: str
+    sources_sha256: object
+    components: object
+    companions: object
+    targets: dict[str, TargetRecord]
+    inputs: dict[str, object]
+
+
+def is_object_mapping(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+def object_mapping(value: object) -> dict[str, object]:
+    if not is_object_mapping(value):
+        raise ValueError("expected JSON object")
+    return value
+
+
+def is_target_record(record: dict[str, object]) -> TypeGuard[TargetRecord]:
+    return (set(record) == {"target", "profile", "archive", "sha256", "bytes"}
+            and isinstance(record["target"], str) and isinstance(record["profile"], str)
+            and isinstance(record["archive"], str) and isinstance(record["sha256"], str)
+            and type(record["bytes"]) is int)
+
+
+def merge(assets: Path, parts: Sequence[Mapping[str, object]]) -> Release:
     if not parts:
         raise ValueError("no provenance inputs")
-    merged = {key: parts[0].get(key) for key in SHARED}
-    merged["targets"], merged["inputs"] = {}, {}
-    if merged["schema"] != 1:
+    first = parts[0]
+    schema = first.get("schema")
+    if schema != 1:
         raise ValueError("unsupported provenance schema")
+    revision, profile, product, version = (first.get("builder_revision"), first.get("profile"), first.get("product"), first.get("version"))
+    if not isinstance(revision, str) or not isinstance(profile, str) or not isinstance(product, str) or not isinstance(version, str):
+        raise TypeError("invalid provenance identity")
+    merged: Release = {
+        "schema": schema, "builder_revision": revision, "profile": profile, "product": product, "version": version,
+        "sources_sha256": first.get("sources_sha256"), "components": first.get("components"),
+        "companions": first.get("companions"), "targets": {}, "inputs": {},
+    }
     for part in parts:
         for key in SHARED:
             if part.get(key) != merged[key]:
                 raise ValueError(f"provenance {key} differs between targets")
-        for target, record in part["targets"].items():
+        for target, raw_record in object_mapping(part["targets"]).items():
             if target in merged["targets"]:
                 raise ValueError(f"duplicate target {target}")
-            expected = {"target", "profile", "archive", "sha256", "bytes"}
-            if set(record) != expected or record["target"] != target or record["profile"] != merged["profile"]:
+            record = object_mapping(raw_record)
+            if not is_target_record(record) or record["target"] != target or record["profile"] != merged["profile"]:
                 raise ValueError(f"invalid target record {target}")
+            archive_name = record["archive"]
             stem = f"{merged['product']}-{merged['version']}-{target}"
             if record["archive"] != f"{stem}.tar.xz":
                 raise ValueError(f"unexpected archive name for {target}")
-            archive = assets / record["archive"]
+            archive = assets / archive_name
             if not archive.is_file() or archive.is_symlink():
                 raise ValueError(f"missing archive {record['archive']}")
             if archive.stat().st_size != record["bytes"] or digest(archive) != record["sha256"]:
@@ -49,26 +98,28 @@ def merge(assets: Path, parts: list[dict]) -> dict:
             manifest_file = assets / f"{stem}.manifest.json"
             if not manifest_file.is_file() or manifest_file.is_symlink():
                 raise ValueError(f"missing manifest {manifest_file.name}")
-            manifest = json.loads(manifest_file.read_text())
+            manifest = object_mapping(json.loads(manifest_file.read_text()))
             if (manifest["sha256"], manifest["source_revision"]) != (record["sha256"], merged["builder_revision"]):
                 raise ValueError(f"manifest differs from provenance for {target}")
             merged["targets"][target] = record
-            merged["inputs"][target] = part["inputs"][target]
+            merged["inputs"][target] = object_mapping(part["inputs"])[target]
     companions = merged.get("companions")
     if not isinstance(companions, dict) or set(companions) != set(COMPANIONS):
         raise ValueError(f"release requires companions {', '.join(COMPANIONS)}")
-    for name, record in companions.items():
+    for name, raw_record in object_mapping(companions).items():
+        record = object_mapping(raw_record)
         expected = {"archive", "version", "sha256", "bytes", "source_sha"}
-        if set(record) != expected or not all(isinstance(value, str) for value in (record["archive"], record["version"], record["sha256"], record["source_sha"])):
+        archive_name = record.get("archive")
+        if set(record) != expected or not isinstance(archive_name, str) or not all(isinstance(value, str) for value in (record["version"], record["sha256"], record["source_sha"])):
             raise ValueError(f"invalid companion record {name}")
         if type(record["bytes"]) is not int or record["bytes"] <= 0:
             raise ValueError(f"invalid companion size {name}")
-        archive = assets / record["archive"]
+        archive = assets / archive_name
         if archive.name != record["archive"] or not archive.is_file() or archive.is_symlink():
             raise ValueError(f"missing companion archive {archive}")
         if archive.stat().st_size != record["bytes"] or digest(archive) != record["sha256"]:
             raise ValueError(f"companion archive digest or size mismatch: {name}")
-        name_parts = Path(record["archive"]).parts
+        name_parts = Path(archive_name).parts
         if len(name_parts) != 1:
             raise ValueError(f"companion archive must not contain directories: {name}")
         with tarfile.open(archive, "r:gz") as bundle:
@@ -84,7 +135,7 @@ def merge(assets: Path, parts: list[dict]) -> dict:
     return merged
 
 
-def write(assets: Path, merged: dict) -> None:
+def write(assets: Path, merged: Release) -> None:
     (assets / "provenance.json").write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
     write_sha256sums(assets)
 
@@ -94,7 +145,7 @@ def main(argv: list[str]) -> int:
         print(__doc__.strip(), file=sys.stderr)
         return 2
     assets = Path(argv[1])
-    parts = [json.loads(Path(path).read_text()) for path in argv[2:]]
+    parts = [object_mapping(json.loads(Path(path).read_text())) for path in argv[2:]]
     write(assets, merge(assets, parts))
     print(f"ok: release provenance {digest(assets / 'provenance.json')}")
     return 0
