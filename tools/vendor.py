@@ -218,18 +218,18 @@ def update(data: Manifest, refs: dict[str, str]) -> None:
                     os.replace(backup, destination)
                     raise
                 swapped.append((destination, backup))
+            check(staged, ROOT)
             proposed = MANIFEST.with_suffix(".json.tmp")
             try:
                 proposed.write_text(json.dumps(staged, indent=2) + "\n")
                 os.replace(proposed, MANIFEST)
             finally:
                 proposed.unlink(missing_ok=True)
-        except Exception:
+        except BaseException:
             for destination, backup in reversed(swapped):
                 shutil.rmtree(destination)
                 os.replace(backup, destination)
             raise
-    check(staged)
     print("Source snapshots refreshed. NOT a runtime/SDK update; run /pi-update gates before integration.")
 
 
