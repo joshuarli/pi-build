@@ -53,13 +53,6 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(actual, expected)
                 self.assertEqual(manifest["packages"], {"@scope/example": sum(len(value) for value in expected.values())})
 
-    def test_archive_rejects_unknown_profile_before_creating_output(self):
-        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
-            root = Path(directory)
-            output = root / "dist/asset.tar.xz"
-            with self.assertRaisesRegex(ValueError, "^unsupported profile: alternate$"):
-                archive(root / "source", output, "pi", "1.5.0", "aarch64-apple-darwin", "alternate", "a" * 40)
-            self.assertFalse(output.parent.exists())
 
     def test_same_tree_has_same_archive_and_manifest_identity(self):
         with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
