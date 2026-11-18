@@ -168,6 +168,61 @@ class VendorUpdateTests(unittest.TestCase):
             vendor.update(self.manifest_data(), {})
         self.assertEqual(self.snapshot(), self.original)
 
+    def test_update_rolls_back_if_the_first_backup_move_is_interrupted(self):
+        replace = os.replace
+
+        def interrupt_after_backup(source, destination):
+            replace(source, destination)
+            if Path(destination).name == "pi-subagents-previous":
+                raise KeyboardInterrupt
+
+        with (
+            patch.object(vendor, "command", side_effect=self.staged_command),
+            patch.object(vendor.os, "replace", side_effect=interrupt_after_backup),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            vendor.update(self.manifest_data(), {})
+        self.assertEqual(self.snapshot(), self.original)
+
+    def test_update_preserves_the_new_snapshot_if_the_manifest_commit_is_interrupted(self):
+        replace = os.replace
+
+        def interrupt_after_commit(source, destination):
+            replace(source, destination)
+            if Path(destination) == self.manifest:
+                raise KeyboardInterrupt
+
+        with (
+            patch.object(vendor, "command", side_effect=self.staged_command),
+            patch.object(vendor.os, "replace", side_effect=interrupt_after_commit),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            vendor.update(self.manifest_data(), {})
+        with redirect_stdout(io.StringIO()):
+            vendor.check(self.manifest_data().raw, self.root)
+        self.assertEqual(self.manifest_data().sources["pi-subagents"].sha, "b" * 40)
+
+    def test_update_preserves_original_backups_if_rollback_itself_fails(self):
+        replace = os.replace
+
+        def fail_restore(source, destination):
+            if Path(source).name == "agent-intercom-core-previous":
+                raise OSError("fixture cannot restore the original Intercom snapshot")
+            return replace(source, destination)
+
+        with (
+            patch.object(vendor, "command", side_effect=self.staged_command),
+            patch.object(vendor.os, "replace", side_effect=fail_restore),
+            patch.object(vendor, "check", side_effect=ValueError("fixture installed verification failed")),
+            self.assertRaisesRegex(OSError, "fixture cannot restore"),
+        ):
+            vendor.update(self.manifest_data(), {})
+        self.assertEqual(self.manifest.read_bytes(), self.original["upstreams.json"])
+        for name in self.names:
+            backups = list((self.root / "sources").glob(f".pi-backup-*/{name}-previous/package.json"))
+            self.assertEqual(len(backups), 1, name)
+            self.assertEqual(backups[0].read_bytes(), self.original[f"{name}/package.json"])
+
 
     def test_update_validates_ref_before_starting_a_checkout(self):
         for ref in ("with spaces", "-leading", "two..dots"):

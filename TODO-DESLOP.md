@@ -548,6 +548,26 @@ Changes to the build tools, workflow, locks and overlays select all
 seven modules. Native profile, companion and Intercom checks exercise
 the corresponding runtime behavior.
 
+The cumulative review at `0da2614b` reproduced three interrupted vendor
+transactions. An interruption after moving the first original snapshot
+removed it, an interruption after replacing the manifest restored the
+old source files under a new manifest, and a failed restore deleted
+the only backups. These were simulated after real renames in scratch
+directories with fake Git responses.
+
+The update now records the intended backup paths before moving the
+originals. It stages the manifest in a unique temporary directory,
+then distinguishes interruption before and after the atomic rename by
+whether the proposed file still exists. An interrupted restore leaves
+the original bytes under `sources/.pi-backup-*/` for recovery. Run
+`make test` for all three regressions and the unchanged packing checks.
+
+The new vendor source generated 552 identities. The macOS run caught
+543. Case-sensitive Linux caught update 148 (uppercase `package.json`)
+and 183 (uppercase backup parent path) with the successful update
+fixture and fresh bytecode prefixes. The remaining seven equivalents
+are unchanged in behavior and bound to the new source and spans.
+
 ## Tickets
 
 
