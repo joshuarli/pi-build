@@ -92,6 +92,23 @@ make test
 make lint
 ```
 
+
+The follow-up at `32324e8` uses the same 250 merge identities and the
+reproduction above. Normalize the gzip header to `mtime=0` in both fixture
+copies before comparing. A clock control at consecutive seconds produced
+different companion digests on the old fixture and identical digests with
+that change. Without the normalization, two baseline runs counted 224 and
+225 catches, with a nominal catch that the standalone control did not repeat.
+
+With deterministic fixtures the baseline caught 223 and the candidate caught
+245. The new cases verify provenance diagnostics and the companion archive
+name, file type, digest, size, compression and member count. Activating
+mutant 212 broke both wrong-size and wrong-digest checks. ID 225 can only alter
+an error reached after the archive already passed the basename and regular
+file conditions. That path is unreachable for declared bare filenames. IDs
+237, 239, 240 and 242 remain open in archive-member validation. All 26 tests,
+Ruff and ty passed.
+
 ## Tickets
 
 
