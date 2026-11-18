@@ -13,7 +13,8 @@ HEADLESS_EXCLUSIONS = ("*.map", "*.d.ts", "*.d.mts", "*.d.cts")
 
 
 def digest(path):
-    return sha256_file(Path(path))
+    archive_path = Path(path)
+    return sha256_file(archive_path)
 
 
 def _inventory(root: Path) -> dict[str, int]:
