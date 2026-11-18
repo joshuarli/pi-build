@@ -4,13 +4,6 @@ import tarfile
 from pathlib import Path
 
 
-def normalized(info):
-    info.uid = info.gid = 0
-    info.uname = info.gname = ""
-    info.mtime = 0
-    return info
-
-
 source = Path(sys.argv[1])
 output = Path(sys.argv[2])
 with (

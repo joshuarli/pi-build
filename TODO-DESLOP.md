@@ -184,8 +184,8 @@ were caught. The remaining validator IDs are 30–33, 41, 43, 45–49 and 67.
 The production archive code is identical in both seals.
 
 The intended XZ archive is extracted by the real tarfile reader. The test
-checks the extracted byte and link inventory as well as the member selection
-and data filter. Invalid metadata stays in in-memory validator fixtures
+checks the extracted byte and link inventory and the member selection. The
+valid fixture exercises Python's default extraction filter. Invalid metadata stays in in-memory validator fixtures
 except for a benign duplicate member that must fail before extraction.
 The compression boundary rejects a gzip fixture before creating a destination.
 Changing `tarfile.open(source, "r:xz")` to `tarfile.open(source, "r:*")`
@@ -201,6 +201,23 @@ Add `also_copy = ["sources.lock.json", "sources/upstreams.json"]` to the
 `exit_code_by_key` maps in `mutants/tools/archive.py.meta`. Both commands
 exited zero under the same 120-second bound. Remaining archive validator
 identities, vendor, artifact build and live providers remain open.
+
+The pack and size commands were exercised directly through the same
+isolated Python entry points as `tools/build.sh` and `make sizes`, from
+`cac013c98b251f4b256fa2c32f130bfefec13388`. The pack fixture preserves
+regular bytes, permissions, a directory and a relative link. Reversing
+input order and changing owners and times yields identical normalized
+gzip bytes. Removing the sort in a separate sealed copy makes the test
+fail on the byte comparison. The size command prints only the requested
+profile, in archive name order, with exact compressed and payload totals.
+
+`tools/pack.py:normalized` had no callers. The tracked references to the
+script execute it through `python -I` or include its bytes in the build-tool
+digest. The live normalization stays in the member loop. Removing the
+unused helper changes the build-tool digest on the next build.
+The before and after fixture tests passed. These are CLI checks for the
+local package tools. Native builds, providers and broader dead-code work
+remain open.
 
 ## Tickets
 
