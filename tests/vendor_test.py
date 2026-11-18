@@ -16,8 +16,21 @@ class VendorTests(unittest.TestCase):
         }}, "metadata": ["preserved"]}
         before = json.dumps(data, indent=2)
         sources = parse_sources(data)
+        self.assertEqual(sources["example"].path, "sources/example")
+        self.assertEqual(sources["example"].sha, "revision")
+        self.assertEqual(sources["example"].files, {"index.ts": "hash"})
         self.assertIs(sources["example"].raw, data["sources"]["example"])
         self.assertEqual(json.dumps(data, indent=2), before)
+
+    def test_parse_identifies_invalid_path_and_file_hash(self):
+        source = {"path": 7, "sha": "revision", "files": {"index.ts": "hash"}}
+        data = {"sources": {"example": source}}
+        with self.assertRaisesRegex(ValueError, "^invalid path for example$"):
+            parse_sources(data)
+        source["path"] = "sources/example"
+        source["files"] = {"index.ts": 7}
+        with self.assertRaisesRegex(ValueError, "^invalid file hash for example: index\\.ts$"):
+            parse_sources(data)
 
     def test_materialization_rejects_non_string_revision_before_copy(self):
         with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
