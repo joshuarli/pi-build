@@ -27,6 +27,9 @@ target-version = "py315"
 [tool.ty.environment]
 python-version = "3.15"
 
+[tool.ty.rules]
+missing-type-argument = "error"
+
 [[tool.uv.index]]
 url = "https://pypi.17166969.xyz/current/simple/"
 default = true
