@@ -441,6 +441,51 @@ established timeout. The controller operates solely on local
 fixtures in this test. Native releases and real upstream updates
 are separate from these transactional checks.
 
+On native Linux, both profiles passed `make repro verify` on x86-64 and
+ARM64 with the locked builder tools and unchanged locks. All four archives
+matched independent rebuilds. Manifest verification, Pi CLI examples, the
+offline extension and loopback provider fixtures, and the companion checks
+passed. A separate Alpine step reran the CLI and extension checks under
+native musl on both targets. The checkout was
+`ab29bef46cff931c91c69840e54eb657f2bd7cac`, GitHub's merge of draft head
+`d40f7af964aa088308d9b828be8a8717d570d2f3` and base `d0dfb9ca`.
+[Hosted Linux run](https://github.com/joshuarli/pi-build/actions/runs/44331458109)
+
+| Linux target | Profile | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| x86_64 musl | headless-usr | 12795700 | `bfa5a51ea28cc0ae2bf313d1d09dfaade18ebe4639f51e99f5e25acda6429b4e` |
+| x86_64 musl | full | 21205200 | `69aa0f29d8feb9ba8e3ee06a16489c903ceebe8dbe4ed0bf4607873e2d56403e` |
+| aarch64 musl | headless-usr | 12794856 | `40465a3b5e210aa25870de5386870da83451a1bd9298aa46ad222d8cc41e9865` |
+| aarch64 musl | full | 20687892 | `750302a9f851abecac1a4ecdbbbd6ee2af360fe47f916cdc1815918a1f15377b` |
+
+The pack and sizes commands now expose their existing bodies to the
+fixture through `main()`. The real `python -I` entry points still run in
+the ordinary suite. A separate comparison against `fa46069e` produced
+identical gzip bytes and stdout for both size profiles. The new dangling
+symlink fixture catches pack mutation 55, which attempts to read every
+tar member as a file.
+
+With Python 3.15, mutmut 3.8.1 and pytest 9.2.0, the final macOS run caught
+83 of 90 identities. Two exact uppercase path faults from sizes, 10 and
+22, were caught separately on a case-sensitive Linux container filesystem
+using Python 3.14. Pack 13 changes explicit gzip input to autodetection
+for already verified gzip companion inputs. Pack 20 and 25 infer the
+same write mode from the output stream. Pack 36 and 39 use the default
+PAX format. The latter five are equivalent within the builder's input
+contract. A non-gzip invocation of `pack.py` is outside that contract.
+
+For the mutation run, copy the three package tools and
+`tests/package_tools_test.py` into a fresh scratch directory and create
+`mutants/.work/tmp`. Use `source_paths = ["tools/"]`,
+`only_mutate = ["tools/pack.py", "tools/sizes.py"]`,
+`also_copy = ["tools/fetch.py", "cli-proof/"]`,
+`pytest_add_cli_args_test_selection = ["tests/package_tools_test.py"]`
+and `use_setproctitle = false`. Copy pristine pack and sizes scripts
+into `cli-proof/` and point only the scratch subprocess invocations
+there. Isolated subprocesses then use the real CLI without requiring
+mutmut while the two direct calls exercise the instrumented bodies.
+Use one mutation worker and inspect both `exit_code_by_key` maps.
+
 ## Tickets
 
 

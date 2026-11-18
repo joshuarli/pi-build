@@ -6,14 +6,14 @@ import sys
 import tarfile
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 sys.path.insert(0, str(ROOT))
-from tools import fetch
+from tools import fetch, pack, sizes
 
 
 class PackageToolsTests(unittest.TestCase):
@@ -95,6 +95,7 @@ class PackageToolsTests(unittest.TestCase):
                 ("pkg/file.js", tarfile.REGTYPE, 0o644, ""),
                 ("pkg", tarfile.DIRTYPE, 0o755, ""),
                 ("pkg/alias.js", tarfile.SYMTYPE, 0o777, "file.js"),
+                ("pkg/missing.js", tarfile.SYMTYPE, 0o777, "absent.js"),
             )
             outputs = []
             for index, members in enumerate((specs, specs[::-1]), start=1):
@@ -112,7 +113,11 @@ class PackageToolsTests(unittest.TestCase):
                         stream = io.BytesIO(payload) if member.isfile() else None
                         member.size = len(payload) if stream is not None else 0
                         archive.addfile(member, stream)
-                subprocess.run([sys.executable, "-I", TOOLS / "pack.py", source, output], check=True)
+                if index == 1:
+                    subprocess.run([sys.executable, "-I", TOOLS / "pack.py", source, output], check=True)
+                else:
+                    with patch.object(sys, "argv", ["pack.py", str(source), str(output)]):
+                        pack.main()
                 outputs.append(output)
 
             self.assertEqual(outputs[0].read_bytes(), outputs[1].read_bytes())
@@ -151,7 +156,18 @@ class PackageToolsTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.stderr, "")
-            self.assertEqual(result.stdout.splitlines(), [
-                "x86_64-unknown-linux-musl compressed=300 payload=34",
-                "aarch64-apple-darwin compressed=52 payload=9",
-            ])
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    "x86_64-unknown-linux-musl compressed=300 payload=34",
+                    "aarch64-apple-darwin compressed=52 payload=9",
+                ],
+            )
+
+            with (
+                chdir(root),
+                patch.object(sys, "argv", ["sizes.py", "headless-usr"]),
+                redirect_stdout(io.StringIO()) as direct,
+            ):
+                sizes.main()
+            self.assertEqual(direct.getvalue(), "aarch64-apple-darwin compressed=100 payload=80\n")
