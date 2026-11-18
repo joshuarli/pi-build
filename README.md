@@ -59,6 +59,11 @@ only to copied sources, with their digest recorded in release provenance. Run
 [implementation and verification handoff](docs/verification/intercom-tailnet.md)
 for configuration, coordinator boundaries, release adoption and two-host checks.
 
+If a source update reports a failed restore, any pending originals
+remain under `sources/.pi-backup-*/` with `-previous` names. Restore those
+directories before retrying, then run `python3 -I tools/vendor.py check`
+to compare the installed snapshots with `sources/upstreams.json`.
+
 `PROFILE=headless-usr` builds a reduced runtime from the same locked inputs. Packaging compiles the three extensions and Intercom broker with the pinned build-time TypeScript compiler. The archive excludes source maps and type declarations, `tsx`, esbuild, and the AWS/Smithy packages. Bedrock requests return an explicit unsupported-profile error. The full profile retains Bedrock support.
 
 The reduced profile preserves docs, examples, licenses, images, the interactive CLI, and OpenCode Go's Anthropic, Google, and OpenAI protocols. It supplies runtime SDK JavaScript without development declarations. Pi retains `jiti` for user-provided extensions. `headless-usr` describes the intended consumer rather than a dedicated CLI entry point without interactive code.

@@ -205,31 +205,30 @@ def update(data: Manifest, refs: dict[str, str]) -> None:
             package = object_mapping(json.loads((output / "package.json").read_text()))
             src.raw.update(sha=upstream_sha, ref=ref, version=package["version"],
                        files=dict(sorted(hashes.items())))
-        # Do not partially replace sources if fetching or inspecting any source failed.
-        swapped = []
+        proposed = temp_root / "upstreams.json.tmp"
+        proposed.write_text(json.dumps(staged, indent=2) + "\n")
+        backup_root = Path(tempfile.mkdtemp(prefix=".pi-backup-", dir=ROOT / "sources"))
+        backups: list[tuple[Path, Path]] = []
         try:
             for name, src in sources.items():
                 destination = ROOT / src.path
-                backup = temp_root / f"{name}-previous"
+                backup = backup_root / f"{name}-previous"
+                backups.append((destination, backup))
                 os.replace(destination, backup)
-                try:
-                    os.replace(temp_root / f"{name}-new", destination)
-                except OSError:
-                    os.replace(backup, destination)
-                    raise
-                swapped.append((destination, backup))
+                os.replace(temp_root / f"{name}-new", destination)
             check(staged, ROOT)
-            proposed = MANIFEST.with_suffix(".json.tmp")
-            try:
-                proposed.write_text(json.dumps(staged, indent=2) + "\n")
-                os.replace(proposed, MANIFEST)
-            finally:
-                proposed.unlink(missing_ok=True)
+            os.replace(proposed, MANIFEST)
         except BaseException:
-            for destination, backup in reversed(swapped):
-                shutil.rmtree(destination)
-                os.replace(backup, destination)
+            # The atomic replacement consumes the proposed file when it commits.
+            if proposed.exists():
+                for destination, backup in reversed(backups):
+                    if backup.exists():
+                        if destination.exists():
+                            shutil.rmtree(destination)
+                        os.replace(backup, destination)
+            shutil.rmtree(backup_root)
             raise
+        shutil.rmtree(backup_root)
     print("Source snapshots refreshed. NOT a runtime/SDK update; run /pi-update gates before integration.")
 
 
