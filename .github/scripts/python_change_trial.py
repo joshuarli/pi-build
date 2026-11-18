@@ -130,6 +130,7 @@ def main() -> None:
     print("selected Python modules", sorted(selected), flush=True)
     receipts = gate.load_json(ROOT / ".github/scripts/python_mutation_receipts.json")
     deadline = time.monotonic() + 500
+    failures: dict[str, dict[str, str]] = {}
     with tempfile.TemporaryDirectory(prefix="pi-python-trial-", dir=os.environ["TMPDIR"]) as temporary:
         for module in sorted(selected):
             directory = Path(temporary) / module
@@ -147,10 +148,12 @@ def main() -> None:
                 if status != "killed" and (status != "survived" or name not in approved)
             }
             if pending:
-                raise ValueError(f"{module}: unqualified mutations: {pending}")
+                failures[module] = pending
             if CYCLE in approved:
                 verify_archive_cycle(directory)
             print(module, "approved survivors", sorted(name for name in approved if results[name] != "killed"), flush=True)
+    if failures:
+        raise ValueError(f"unqualified Python mutations: {failures}")
 
 
 if __name__ == "__main__":
