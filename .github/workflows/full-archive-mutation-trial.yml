@@ -1,0 +1,63 @@
+name: full archive mutation trial
+
+on: pull_request
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  mutation:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 6
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - run: uv python install 3.15
+      - name: Verify exact case-sensitive archive inventory
+        run: |
+          export TMPDIR="$PWD/.work/tmp"
+          root="$PWD"
+          proof="$TMPDIR/archive-linux"
+          mkdir -p "$proof/tools" "$proof/tests" "$proof/sources" "$proof/mutants/sources" "$proof/mutants/.work/tmp"
+          cp tools/archive.py "$proof/tools/"
+          cp tests/archive_test.py "$proof/tests/"
+          cp sources.lock.json "$proof/"
+          cp sources/upstreams.json "$proof/sources/"
+          cat > "$proof/pyproject.toml" <<'EOF'
+          [tool.mutmut]
+          source_paths = ["tools/"]
+          pytest_add_cli_args_test_selection = ["tests/archive_test.py"]
+          also_copy = ["sources.lock.json", "sources/upstreams.json"]
+          use_setproctitle = false
+          timeout_constant = 5.0
+          EOF
+          test ! -e "$proof/SOURCES.LOCK.JSON"
+          test ! -e "$proof/SOURCES/UPSTREAMS.JSON"
+          cd "$proof"
+          timeout 120 uv run --project "$root" --frozen --with mutmut==3.8.1 --with pytest==9.2.0 mutmut run --max-children 1 'tools.archive.*'
+          uv run --project "$root" --frozen python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          data = json.loads(Path("mutants/tools/archive.py.meta").read_text())["exit_code_by_key"]
+          counts = dict(Counter(data.values()))
+          remaining = {k.rsplit(".", 1)[-1] for k, status in data.items() if status == 0}
+          print("inventory", len(data), "outcomes", counts, "survivors", sorted(remaining), flush=True)
+          assert counts == {1: 261, 0: 7}, counts
+          assert remaining == {
+              "x_archive__mutmut_14", "x_archive__mutmut_16",
+              "x_archive__mutmut_18", "x_archive__mutmut_19",
+              "x_archive__mutmut_23", "x_archive__mutmut_24",
+              "x_validate_members__mutmut_67",
+          }, remaining
+          PY
