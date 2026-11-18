@@ -494,6 +494,35 @@ change. They now exit 1. Missing OpenCode exits 1 before any companion
 is accepted. The complete fixture and the actual companion archives in
 both macOS profiles pass. Run `make test-companions` for the four fixtures.
 
+The whole vendor controller trial at `334f82f4` generated the same 545
+identities before and after the new tests. The generated source files
+compared byte for byte. The baseline caught 394 identities, missed 25,
+and exercised no test for 126. The new suite caught 537, with eight
+survivors and no untested identities or timeouts on macOS. It checks the
+CLI's accepted actions, reference validation, help and failures, the
+Git command's output and status, the read-only plan, missing and changed
+snapshot inventory, and materialization of nested sibling files.
+
+A case-sensitive Linux control using Python 3.14 caught update mutation
+148, which changes `package.json` to `PACKAGE.JSON`. In the container's
+filesystem, rerun the ordinary successful-update test after changing
+that literal and setting a fresh `PYTHONPYCACHEPREFIX`. It raises
+`FileNotFoundError` on the changed copy. Seven remaining identities
+are equivalent within the supported contract: command 6 and 11 use
+the same falsey `check` default, update 31, 33, 35 and 36 change only
+the temporary directory prefix, and main 38 splits a supported
+`NAME=REF` on its sole equals sign. Multiple equals signs still fail
+but can produce different diagnostics.
+
+Use the preceding vendor mutation recipe with both vendor test files,
+`also_copy = ["sources/upstreams.json"]` and the entire
+`tools.vendor.*` module. Include a pristine `cli-proof/vendor.py` in
+the candidate scratch copy and point only the isolated help subprocess
+at it. The ordinary tests run the real script and compare its help to
+the callable entry point. No upstream network operation ran in these
+fixtures. Whole-change and broader first-party shell and JS coverage
+remain separate from the Python module proof.
+
 ## Tickets
 
 

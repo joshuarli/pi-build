@@ -1,9 +1,12 @@
+import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -12,6 +15,192 @@ from tools.vendor import check, git_blob_sha, materialize, parse_sources, source
 
 
 class VendorTests(unittest.TestCase):
+    def test_command_returns_clean_output_or_raises_with_stderr(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory).resolve()
+            self.assertEqual(
+                vendor.command(sys.executable, "-c", "from pathlib import Path; print(Path.cwd())", cwd=root),
+                str(root),
+            )
+            args = (
+                sys.executable, "-c", "import sys; print('checkout failed', file=sys.stderr); sys.exit(17)",
+                "extra argument",
+            )
+            with self.assertRaises(ValueError) as raised:
+                vendor.command(*args, cwd=root)
+            self.assertEqual(str(raised.exception), f"{' '.join(args[:3])} failed: checkout failed")
+
+    def test_plan_reports_current_and_missing_heads_without_an_update(self):
+        sources = {
+            "pi-subagents": vendor.Source("sources/pi-subagents", "a" * 40, {}, {"repository": "owner/first"}),
+            "pi-devin-local": vendor.Source("sources/pi-devin-local", "b" * 40, {}, {"repository": "owner/second"}),
+        }
+        current = "c" * 40
+        with (
+            patch.object(vendor, "command", side_effect=[f"{current}\trefs/heads/main", ""]) as git,
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            vendor.plan(vendor.Manifest({}, sources))
+        self.assertEqual(git.call_args_list, [
+            call("git", "ls-remote", "https://github.com/owner/first.git", "refs/heads/main"),
+            call("git", "ls-remote", "https://github.com/owner/second.git", "refs/heads/main"),
+        ])
+        self.assertEqual(output.getvalue().splitlines(), [
+            f"{'pi-subagents':24s} {'a' * 40} -> {current}",
+            f"{'pi-devin-local':24s} {'b' * 40} -> (missing branch)",
+            "Pi CLI/SDK remain track-only; rebuild and vendor the full executable/dependency closure before activation.",
+        ])
+
+    def test_cli_dispatches_after_validation(self):
+        manifest = vendor.Manifest({}, {})
+        for args, expected_calls in (
+            (["check"], [call.check({}, vendor.ROOT)]),
+            (["plan"], [call.plan(manifest)]),
+            (["update", "--ref", "pi-subagents=v1.2.3"], [
+                call.check({}, vendor.ROOT),
+                call.update(manifest, {"pi-subagents": "v1.2.3"}),
+            ]),
+        ):
+            with (
+                self.subTest(args=args),
+                patch.object(sys, "argv", ["vendor.py", *args]),
+                patch.object(vendor, "load", return_value=manifest) as load,
+                patch.object(vendor, "check_sources") as check,
+                patch.object(vendor, "plan") as plan,
+                patch.object(vendor, "update") as update,
+            ):
+                actions = Mock()
+                actions.attach_mock(check, "check")
+                actions.attach_mock(plan, "plan")
+                actions.attach_mock(update, "update")
+                self.assertEqual(vendor.main(), 0)
+                load.assert_called_once_with()
+                self.assertEqual(actions.mock_calls, expected_calls)
+
+    def test_cli_rejects_invalid_refs_and_reports_input_errors(self):
+        for args, message in (
+            (["update", "--ref", "pi-subagents"], "invalid or duplicate --ref: pi-subagents"),
+            (["update", "--ref", "unlisted=main"], "invalid or duplicate --ref: unlisted=main"),
+            (["update", "--ref", "pi-subagents="], "invalid or duplicate --ref: pi-subagents="),
+            (["update", "--ref", "pi-subagents=a", "--ref", "pi-subagents=b"],
+             "invalid or duplicate --ref: pi-subagents=b"),
+            (["check", "--ref", "pi-subagents=main"], "--ref is only valid with update"),
+            (["plan", "--ref", "pi-subagents=main"], "--ref is only valid with update"),
+        ):
+            with (
+                self.subTest(args=args),
+                patch.object(sys, "argv", ["vendor.py", *args]),
+                patch.object(vendor, "load", return_value=vendor.Manifest({}, {})),
+                redirect_stderr(io.StringIO()) as error,
+                self.assertRaises(SystemExit) as status,
+            ):
+                vendor.main()
+            self.assertEqual(status.exception.code, 2)
+            self.assertTrue(error.getvalue().endswith(f"error: {message}\n"), error.getvalue())
+
+        for failure in (OSError("unavailable manifest"), ValueError("invalid manifest")):
+            with (
+                self.subTest(failure=failure),
+                patch.object(sys, "argv", ["vendor.py", "check"]),
+                patch.object(vendor, "load", side_effect=failure),
+                redirect_stderr(io.StringIO()) as error,
+            ):
+                self.assertEqual(vendor.main(), 1)
+            self.assertEqual(error.getvalue(), f"pi-vendor: {failure}\n")
+
+    def test_cli_rejects_an_unknown_action_before_loading_sources(self):
+        with (
+            patch.object(sys, "argv", ["vendor.py", "unknown"]),
+            patch.object(vendor, "load") as load,
+            redirect_stderr(io.StringIO()) as error,
+            self.assertRaises(SystemExit) as status,
+        ):
+            vendor.main()
+        self.assertEqual(status.exception.code, 2)
+        self.assertIn("invalid choice: 'unknown'", error.getvalue())
+        load.assert_not_called()
+
+    def test_isolated_vendor_cli_accepts_help(self):
+        result = subprocess.run(
+            [sys.executable, "-I", ROOT / "tools/vendor.py", "--help"],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertIn("{check,plan,update}", result.stdout)
+        self.assertIn("--ref NAME=REF", result.stdout)
+        self.assertEqual(result.stderr, "")
+        with (
+            patch.object(sys, "argv", ["vendor.py", "--help"]),
+            redirect_stdout(io.StringIO()) as help_text,
+            self.assertRaises(SystemExit) as status,
+        ):
+            vendor.main()
+        self.assertEqual(status.exception.code, 0)
+        self.assertEqual(help_text.getvalue(), result.stdout)
+
+    def test_vendor_boundaries_report_invalid_object_and_repository(self):
+        for value in (["not a mapping"], {1: "not a string key"}):
+            with self.subTest(value=value), self.assertRaises(ValueError) as raised:
+                vendor.object_mapping(value)
+            self.assertEqual(str(raised.exception), "expected JSON object")
+        with self.assertRaises(ValueError) as raised:
+            vendor.repository(vendor.Source("sources/example", "a" * 40, {}, {"repository": 3}))
+        self.assertEqual(str(raised.exception), "invalid upstream repository")
+
+    def test_snapshot_diff_reports_and_bounds_each_kind(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory)
+            name = "pi-subagents"
+            path = f"sources/{name}"
+            revision = "a" * 40
+            folder = root / path
+            digest = git_blob_sha(b"verified")
+            with self.assertRaises(ValueError) as raised:
+                vendor.check_sources({name: vendor.Source(path, revision, {}, {})}, root)
+            self.assertEqual(str(raised.exception), f"missing source directory: {folder}")
+            (folder / "src").mkdir(parents=True)
+            for operation in ("missing", "extra", "changed"):
+                with self.subTest(operation=operation):
+                    names = [f"src/{operation}-{index}.ts" for index in range(9)]
+                    sources = {
+                        name: vendor.Source(path, revision, {} if operation == "extra" else dict.fromkeys(names, digest), {}),
+                    }
+                    if operation != "missing":
+                        for relative in reversed(names):
+                            (folder / relative).write_bytes(b"altered")
+                    with self.assertRaises(ValueError) as raised:
+                        vendor.check_sources(sources, root)
+                    missing = names[:8] if operation == "missing" else []
+                    extra = names[:8] if operation == "extra" else []
+                    changed = names[:8] if operation == "changed" else []
+                    self.assertEqual(str(raised.exception), f"{name}: missing={missing}, extra={extra}, changed={changed}")
+                    for relative in names:
+                        (folder / relative).unlink(missing_ok=True)
+
+    def test_materialization_rechecks_for_symlinks_after_inventory(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory)
+            name = "pi-subagents"
+            path = f"sources/{name}"
+            folder = root / path
+            folder.mkdir(parents=True)
+            data = {"sources": {name: {"path": path, "sha": "a" * 40, "files": {}}}}
+            alias = folder / "alias.ts"
+            check_sources = vendor.check_sources
+
+            def check_then_add_alias(sources: dict[str, vendor.Source], snapshot_root: Path) -> None:
+                check_sources(sources, snapshot_root)
+                alias.symlink_to("index.ts")
+
+            destination = root / "materialized"
+            with (
+                patch.object(vendor, "check_sources", side_effect=check_then_add_alias),
+                redirect_stdout(io.StringIO()),
+                self.assertRaises(ValueError) as raised,
+            ):
+                vendor.materialize(data, destination, root)
+            self.assertEqual(str(raised.exception), f"symlink in upstream snapshot: {alias}")
+            self.assertFalse(destination.exists())
+
     def test_source_inventory_uses_the_snapshot_family_and_exclusions(self):
         with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
             root = Path(directory)
@@ -138,18 +327,25 @@ class VendorTests(unittest.TestCase):
             source = root / "sources/pi-subagents"
             source.mkdir(parents=True)
             content = b"export const approved = true;\n"
-            (source / "index.ts").write_bytes(content)
+            relative = "src/deep/index.ts"
+            sibling = "src/deep/sibling.ts"
+            (source / relative).parent.mkdir(parents=True)
+            (source / relative).write_bytes(content)
+            (source / sibling).write_bytes(b"export {};\n")
             (source / ".npmignore").write_text("unlisted packaging rules\n")
             data = {"sources": {"pi-subagents": {
                 "path": "sources/pi-subagents",
                 "sha": "0" * 40,
-                "files": {"index.ts": git_blob_sha(content)},
+                "files": {relative: git_blob_sha(content), sibling: git_blob_sha(b"export {};\n")},
             }}}
             output = root / "build/packages"
-            materialize(data, output, root)
-            self.assertEqual((output / "pi-subagents/index.ts").read_bytes(), content)
+            with redirect_stdout(io.StringIO()) as status:
+                materialize(data, output, root)
+            self.assertEqual(status.getvalue(), f"ok: pi-subagents 2 files upstream={'0' * 40}\n")
+            self.assertEqual((output / "pi-subagents" / relative).read_bytes(), content)
+            self.assertEqual((output / "pi-subagents" / sibling).read_bytes(), b"export {};\n")
             self.assertFalse((output / "pi-subagents/.npmignore").exists())
-            (source / "index.ts").write_text("changed after import\n")
+            (source / relative).write_text("changed after import\n")
             with self.assertRaisesRegex(ValueError, "changed"):
                 check(data, root)
 
