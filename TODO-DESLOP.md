@@ -219,6 +219,31 @@ The before and after fixture tests passed. These are CLI checks for the
 local package tools. Native builds, providers and broader dead-code work
 remain open.
 
+Vendor inventory at `7a8731f07c3cf8b7e0d9dc4d236d7e120bbe1d5d`
+selected the same 77 `source_files`, `git_blob_sha` and `load` mutants.
+The base caught 16, missed 14 and had 47 without tests. The candidate
+caught all 77. Both fresh runs exited zero under 120 seconds, and their
+generated production files compared byte for byte. The final witness
+accepts mixed-case repository names with the same pinned manifest shape.
+
+The snapshot tests check all three inventory selectors against an
+actual tree and reject a symlink in that tree. Git supplies independent
+golden digests for the empty, textual and binary blobs. The pinned
+manifest fixture tests schema, exact source set, revision, repository
+and file inventories. Selecting the general snapshot filter for
+Pi-subagents in a disposable source copy made the inventory test fail
+on its exact path list.
+
+Use the vendor parsing recipe with this base and fresh before and
+candidate copies. Add the tracked `sources/upstreams.json` at
+`sources/upstreams.json` to each scratch tree and
+`also_copy = ["sources/upstreams.json"]` to the mutmut config, and create
+`mutants/sources` and `mutants/.work/tmp` before starting mutmut. Select
+`tools.vendor.x_source_files__mutmut_*`, `tools.vendor.x_load__mutmut_*`
+and `tools.vendor.x_git_blob_sha__mutmut_*`. Compare the corresponding
+`exit_code_by_key` entries in `mutants/tools/vendor.py.meta`.
+No upstream update, native build or live provider activity ran.
+
 ## Tickets
 
 
