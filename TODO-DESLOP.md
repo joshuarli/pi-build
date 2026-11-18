@@ -568,24 +568,49 @@ and 183 (uppercase backup parent path) with the successful update
 fixture and fresh bytecode prefixes. The remaining seven equivalents
 are unchanged in behavior and bound to the new source and spans.
 
+Check-up at `0da2614bfe44e628daea873343301aa2b7165e6d` passed the
+Linux ARM64 pull-request mutation gate and both default checks.
+The same 74 Python tests under `make coverage` exercised 512 of 540
+statements and 210 of 218 branches. The coverage report is informational.
+The four companion fixtures also passed.
+
+On macOS ARM64, warm `make test` elapsed time was 0.235 s at the
+Ground revision `2c6108836ae36c494174e6b76d745f647491df22` and 0.738 s
+at the checked revision, with 11 and 74 tests respectively. These are
+medians of five alternating warm pairs with separate locked environments
+under `cpu-guard --cores 2`. The added 0.503 s is within the suite-cost
+allowance. These times measure the test command, including startup.
+
+The dead-code check covers the first-party Python tools, their tests
+and the mutation fixture runner. Ruff's F401 and F841 checks passed.
+Deptry 0.25.1 passed with `--known-first-party tools`, which recognizes
+the local vendor import in the Intercom controller. Vulture 2.16 at
+60% reports four dynamic release keys in both the production declaration
+and its test declaration. `builder_revision`, `sources_sha256`,
+`components`, and `targets` are written by `tools/build.sh` and used
+through mapping keys by release assembly and its provenance fixtures.
+To reproduce the clean check, give Vulture a scratch allowlist with one
+attribute use per key on a dummy object alongside `tools tests .github/scripts`.
+The earlier pack slice removed an uncalled normalization helper.
+The scope review found no further behavior-preserving removal.
+
+The vendor interruption repair at `2c4b8c7970a2c4b3ebda24c556ab6941374ef8e9`
+passed 77 Python tests, four companion fixtures, the strict profile
+and all 1,434 mutation identities with their prior dispositions.
+Both ordinary default workflows also passed. The remaining
+two-host procedure is tracked below.
+[Mutation run](https://github.com/joshuarli/pi-build/actions/runs/44343948188) ·
+[Default CI](https://github.com/joshuarli/pi-build/actions/runs/44344579001)
+
 ## Tickets
 
 
 
-### DSLP-4 · P2 · Tests: coverage, boundary gaps, mutation
+### DSLP-4 · P2 · Verify Intercom across two enrolled hosts
 
-- **Area:** deslop · tests
-- **Where:** test suites and CI
-- **Problem:** The two-host Intercom qualification and final checked-head test-cost comparison remain open.
-- **Recommendation:** Verify the retained Python mutation gate and run the two-host procedure in `docs/verification/intercom-tailnet.md`.
-- **Fix with:** deslop
-- **Effort:** L
-
-### DSLP-5 · P2 · Dead code: tools and debloat
-
-- **Area:** deslop · dead code
-- **Where:** whole repository
-- **Problem:** No dead-code scan has run.
-- **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
-- **Fix with:** deslop
+- **Area:** Needs owner · Intercom environment
+- **Where:** docs/verification/intercom-tailnet.md, Actual tailnet and harness acceptance
+- **Problem:** Local real sockets, offline provider fixtures and native artifact checks have passed. No result records two separately enrolled tailnet hosts with the actual coordinator harnesses, so cross-host delivery and credential recovery are still unproven.
+- **Recommendation:** Use the documented disposable enrollments on two available tailnet hosts. Run bidirectional delivery through the named harnesses, identity recovery, fleet isolation, revocation and worker isolation. Record the checked builder revision and each host and harness pair.
+- **Fix with:** none
 - **Effort:** M
