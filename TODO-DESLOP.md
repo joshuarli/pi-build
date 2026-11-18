@@ -17,6 +17,44 @@ Vendor types (DSLP-8) at base `47705f96c6ea84db2492a05856ce2af04afa4a5a`: the fi
 
 Tests (DSLP-4, first slice) at base `6bc09103d8914ca4bcd041c308b6ee0e395eda3a`: `make coverage` runs the same 16 sealed Python tests as `make test` and writes `.work/tmp/coverage/coverage.json`. Its seven files equal tracked `tools/*.py`: 255/539 statements and 94/214 branches covered, with 32 partial branches. Archive covers 73/112 statements and 29/44 branches; release 80/104 and 38/56; vendor 102/217 and 27/80. Fetch, intercom, pack, and sizes are unimported and have zero covered statements or branches. This is a component/function layer, not proof of CLI or assembled artifact behavior, and coverage is not a gate. Real intercom and native artifact lanes, boundary gaps, and mutation remain; DSLP-4 stays open.
 
+Vendor parsing mutation slice at base `052d05ac0884d71bab42a399c7f4a2f83a82cb12`: a sealed copy of `tools/vendor.py` and `tests/vendor_test.py`, Python 3.15.2, mutmut 3.8.1, pytest 9.2.0, and one mutation worker selected only `*parse_sources*`. Both runs selected exactly `tools.vendor.x_parse_sources__mutmut_1` through `_45`; the generated mutated source files compared equal with `cmp` (exit 0). Baseline: 42 killed (IDs 1–11, 13–33, 35–38, 40–45), 3 survived (12, 34, 39), 0 timeout, suspicious, skipped, no tests, or other outcomes. Candidate: all 45 killed, 0 in each other category. The progress denominator 542 is all generated module mutants, not the selected 45. Clean baseline and candidate runs exited 0 in 3.29 s and 4.67 s respectively, under 120 s each; these are run durations, not performance claims.
+
+The three baseline survivors are resolved by observable parsing assertions: 12 replaces the invalid-path error label with `None`; 34 does the same for an invalid file hash; 39 drops the parsed revision when constructing `Source`. The candidate kills each. The fixture has the same path, revision and file-inventory shape as `sources/upstreams.json`; it also retains the existing opaque metadata check. No selected survivor remains. This does not establish mutation adequacy outside this function or close the other DSLP-4 boundaries.
+
+Reproduce from the committed candidate, in a fresh scratch area (the two `git show` commands seal baseline inputs; the candidate uses the checked-out test):
+
+```sh
+export TMPDIR="$PWD/.work/tmp" UV_PROJECT_ENVIRONMENT="$PWD/.work/venv" UV_CACHE_DIR="$PWD/.work/tmp/uv-cache"
+mkdir -p "$TMPDIR"
+for run in baseline candidate; do
+  mkdir -p "$TMPDIR/mutation-$run/tools" "$TMPDIR/mutation-$run/tests" "$TMPDIR/mutation-$run/mutants/.work/tmp"
+  git show 052d05ac0884d71bab42a399c7f4a2f83a82cb12:tools/vendor.py > "$TMPDIR/mutation-$run/tools/vendor.py"
+  cat > "$TMPDIR/mutation-$run/pyproject.toml" <<'EOF'
+[tool.mutmut]
+source_paths = ["tools/"]
+pytest_add_cli_args_test_selection = ["tests/vendor_test.py"]
+EOF
+done
+git show 052d05ac0884d71bab42a399c7f4a2f83a82cb12:tests/vendor_test.py > "$TMPDIR/mutation-baseline/tests/vendor_test.py"
+cp tests/vendor_test.py "$TMPDIR/mutation-candidate/tests/vendor_test.py"
+for run in baseline candidate; do
+  (cd "$TMPDIR/mutation-$run" && /usr/bin/time -p uv run --project ../../.. --frozen --with mutmut==3.8.1 --with pytest==9.2.0 mutmut run --max-children 1 '*parse_sources*')
+done
+cmp "$TMPDIR/mutation-baseline/mutants/tools/vendor.py" "$TMPDIR/mutation-candidate/mutants/tools/vendor.py"
+make test
+make lint
+```
+
+Use new empty scratch directories for each reproduction. `make test` exited 0 with 17 passed; `make lint` exited 0 with Ruff and ty both passing. This independent injected-defect check exited 1 with `AssertionError: None != 'revision'` at the new revision assertion; it changes only the scratch copy:
+
+```sh
+mkdir -p .work/tmp/vendor-defect/tools .work/tmp/vendor-defect/tests
+cp tools/vendor.py .work/tmp/vendor-defect/tools/vendor.py
+cp tests/vendor_test.py .work/tmp/vendor-defect/tests/vendor_test.py
+python3.15 -c 'from pathlib import Path; p=Path(".work/tmp/vendor-defect/tools/vendor.py"); s=p.read_text(); old="sources[name] = Source(path, sha, files, src)"; assert s.count(old) == 1; p.write_text(s.replace(old, "sources[name] = Source(path, None, files, src)"))'
+(cd .work/tmp/vendor-defect && uv run --project ../../.. --frozen pytest -p no:cacheprovider tests/vendor_test.py::VendorTests::test_parse_preserves_opaque_manifest_fields)
+```
+
 ## Tickets
 
 
