@@ -5,18 +5,9 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
-Not started.
+Ground (DSLP-1) passed at base `442f463954a6ead8fb9223f8c148bcc4c1bc66cf`. [Verification](AGENTS.md#verification) records the elapsed costs, test boundaries, and artifact checks. The sealed run covered 11 tests. Release artifacts, live providers, and the two-host intercom remain separate checks.
 
 ## Tickets
-
-### DSLP-1 · P2 · Ground: baseline, boundaries, and CI test entry point
-
-- **Area:** deslop · ground
-- **Where:** AGENTS.md, Makefile, .github/workflows/
-- **Problem:** Base 0dedb30; code lines Python 0.7k, TypeScript 140.2k (fleet/loc/v1, vendored included); timings not yet measured. Open fleet lint findings: mdtool 57, registry-sources 10, python-standard 6, build-release-standard 2, owned-tool-support 1. Perf gate: decide in Ground whether a user-visible hot path needs a workload.
-- **Recommendation:** Run the deslop Ground step. Accept: CI runs make test and is green, and AGENTS.md has a Verification section.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-2 · P2 · Diagnose: ultrareview into this backlog
 
