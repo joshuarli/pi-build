@@ -52,6 +52,7 @@ class VendorUpdateTests(unittest.TestCase):
             self.assertEqual(args[2:], ("--porcelain", "--", "sources"))
             return ""
         if args[:2] == ("git", "clone"):
+            self.assertEqual(args[2:6], ("--quiet", "--depth=1", "--filter=blob:none", "--branch"))
             checkout = Path(args[-1])
             self.assertEqual(checkout.parent.parent, self.root / "sources")
             name = checkout.name.removesuffix("-checkout")
@@ -59,8 +60,10 @@ class VendorUpdateTests(unittest.TestCase):
             self.references.append(args[args.index("--branch") + 1])
             checkout.mkdir()
             (checkout / "package.json").write_bytes(b'{"version":"2.0.0"}\n')
-            (checkout / "src").mkdir()
-            (checkout / "src/index.ts").write_bytes(name.encode())
+            (checkout / "src/nested").mkdir(parents=True)
+            (checkout / "src/nested/index.ts").write_bytes(name.encode())
+            (checkout / "docs").mkdir()
+            (checkout / "docs/guide.txt").write_bytes(b"subagents guide")
             (checkout / ".gitignore").write_bytes(b"ignored\n")
             self.assertEqual(args[-2], f"https://github.com/example/{name}.git")
             return ""
@@ -73,24 +76,30 @@ class VendorUpdateTests(unittest.TestCase):
     def test_update_replaces_all_inventories_and_preserves_unowned_metadata(self):
         data = self.manifest_data()
         with patch.object(vendor, "command", side_effect=self.staged_command), redirect_stdout(io.StringIO()) as output:
-            vendor.update(data, {"pi-subagents": "reviewed"})
+            vendor.update(data, {"pi-subagents": "Reviewed"})
         self.assertEqual(self.clones, list(self.names))
-        self.assertEqual(self.references, ["reviewed", "main"])
+        self.assertEqual(self.references, ["Reviewed", "main"])
         self.assertEqual(data.raw, self.raw)
         published = json.loads(self.manifest.read_text())
         self.assertEqual(published["opaque"], self.raw["opaque"])
+        self.assertEqual(self.manifest.read_text(), json.dumps(published, indent=2) + "\n")
         for index, name in enumerate(self.names):
             with self.subTest(name=name):
                 updated = published["sources"][name]
                 self.assertEqual(updated["sha"], ("b" if index == 0 else "c") * 40)
                 self.assertEqual(updated["version"], "2.0.0")
                 self.assertEqual(updated["ref"], self.references[index])
-                self.assertEqual(updated["files"], {
+                expected = {
                     "package.json": vendor.git_blob_sha(b'{"version":"2.0.0"}\n'),
-                    "src/index.ts": vendor.git_blob_sha(name.encode()),
-                })
+                    "src/nested/index.ts": vendor.git_blob_sha(name.encode()),
+                }
+                if name == "pi-subagents":
+                    expected["docs/guide.txt"] = vendor.git_blob_sha(b"subagents guide")
+                self.assertEqual(updated["files"], expected)
                 self.assertFalse((self.root / updated["path"] / ".gitignore").exists())
-        self.assertIn("Source snapshots refreshed.", output.getvalue())
+        last = output.getvalue().splitlines()[-1]
+        self.assertTrue(last.startswith("Source snapshots refreshed."))
+        self.assertTrue(last.endswith("before integration."))
         self.assertEqual(sorted(path.name for path in (self.root / "sources").iterdir()), sorted((*self.names, "upstreams.json")))
 
     def test_update_refuses_uncommitted_sources_before_any_clone(self):
@@ -131,7 +140,7 @@ class VendorUpdateTests(unittest.TestCase):
                 self.assertRaisesRegex(OSError, "fixture replace failed:"),
             ):
                 vendor.update(self.manifest_data(), {})
-            self.assertEqual(self.snapshot(), self.original)
+                self.assertEqual(self.snapshot(), self.original)
 
     def test_update_rolls_back_when_the_installed_bytes_fail_verification(self):
         replace = os.replace
@@ -139,12 +148,12 @@ class VendorUpdateTests(unittest.TestCase):
         def change_after_install(source, destination):
             replace(source, destination)
             if Path(source).name == "agent-intercom-core-new":
-                (Path(destination) / "src/index.ts").write_bytes(b"invalid installed bytes")
+                (Path(destination) / "src/nested/index.ts").write_bytes(b"invalid installed bytes")
 
         with (
             patch.object(vendor, "command", side_effect=self.staged_command),
             patch.object(vendor.os, "replace", side_effect=change_after_install),
-            self.assertRaisesRegex(ValueError, r"changed=\['src/index\.ts'\]"),
+            self.assertRaisesRegex(ValueError, r"changed=\['src/nested/index\.ts'\]"),
         ):
             vendor.update(self.manifest_data(), {})
         self.assertEqual(self.snapshot(), self.original)
@@ -158,3 +167,33 @@ class VendorUpdateTests(unittest.TestCase):
         ):
             vendor.update(self.manifest_data(), {})
         self.assertEqual(self.snapshot(), self.original)
+
+
+    def test_update_validates_ref_before_starting_a_checkout(self):
+        for ref in ("with spaces", "-leading", "two..dots"):
+            with self.subTest(ref=ref):
+                with (
+                    patch.object(vendor, "command", return_value="") as command,
+                    self.assertRaises(ValueError) as raised,
+                ):
+                    vendor.update(self.manifest_data(), {"pi-subagents": ref})
+                self.assertEqual(str(raised.exception), f"unsafe ref: {ref}")
+                command.assert_called_once_with("git", "status", "--porcelain", "--", "sources", cwd=self.root)
+                self.assertEqual(self.snapshot(), self.original)
+
+    def test_update_requires_a_resolved_revision_and_nonempty_source(self):
+        for fault, message in (("revision", "invalid upstream revision for pi-subagents"),
+                               ("inventory", "no source files for pi-subagents")):
+            def no_input(*args: str, cwd: Path | None = None, mode: str = fault) -> str:
+                if mode == "revision" and args == ("git", "rev-parse", "HEAD"):
+                    return "unresolved"
+                if mode == "inventory" and args[:2] == ("git", "clone"):
+                    Path(args[-1]).mkdir()
+                    return ""
+                return self.staged_command(*args, cwd=cwd)
+
+            with self.subTest(fault=fault):
+                with patch.object(vendor, "command", side_effect=no_input), self.assertRaises(ValueError) as raised:
+                    vendor.update(self.manifest_data(), {})
+                self.assertEqual(str(raised.exception), message)
+                self.assertEqual(self.snapshot(), self.original)
