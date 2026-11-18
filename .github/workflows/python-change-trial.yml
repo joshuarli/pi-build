@@ -1,0 +1,43 @@
+name: Python changed-path trial
+
+on: pull_request
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  python:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: laputa-systems/buildlib
+          ref: 1497970d9454a6a9875b1f201cbaad71fd92a010
+          path: .work/engine
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - name: Reconcile selected Python mutations
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          export TMPDIR="$PWD/.work/tmp"
+          mkdir -p "$TMPDIR"
+          printf '%s\n' '.work/' >> .git/info/exclude
+          uv venv --python 3.15 .work/mutation-venv
+          uv pip install --python .work/mutation-venv/bin/python \
+            --index-url https://pypi.17166969.xyz/current/simple/ \
+            mutmut==3.8.1 pytest==9.2.0 laputa-buildlib==0.1.0
+          .work/mutation-venv/bin/python .github/scripts/python_change_trial.py \
+            .work/engine/scripts/mutants_gate.py --base "$BASE_SHA"
