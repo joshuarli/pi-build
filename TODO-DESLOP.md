@@ -13,17 +13,11 @@ Types (DSLP-3) at `0c5b3c3057e73d89099dc2beea82711b1c8e876b`: ty 0.0.101 reports
 
 Release types (DSLP-7) at base `e28f70241025b396fab6d2fc78a0ee62a1bd71a2`: `uv run --locked ty check --error missing-type-argument tools tests` fell from 10 diagnostics (5 release, 5 vendor) to 5 (all vendor). No checker setting was adopted. A negative checker witness appended temporarily to `tests/release_test.py`, `from tools.release import TargetRecord` followed by `def type_witness(record: TargetRecord) -> None: record["archive"] = 1`, produced exactly one `invalid-assignment` diagnostic under `uv run --locked ty check tests/release_test.py`. The witness was removed after the probe; no ignore was added. Opaque nested input metadata serializes identically on the base and candidate. The sealed numeric archive and product fixtures fail on the base with `unexpected archive name` and pass with explicit identity validation; disabling the target guard makes its fixture fail again. The malformed identity error path changes; supported producer formats and fixture output remain unchanged. Release builds and external installer execution were not run.
 
+Vendor types (DSLP-8) at base `47705f96c6ea84db2492a05856ce2af04afa4a5a`: the five remaining `missing-type-argument` diagnostics fell to zero. All ten original diagnostics concerned unchecked decoded manifest mappings; no false positives were identified. Adopted `missing-type-argument` at error. A bare `dict` return allowed `load()["sources"] = 7` without a diagnostic; the strict rule rejects that bare return annotation. A `Source` witness assigning `7` to `source.files["index.ts"]` now yields one `invalid-assignment`. The sealed numeric revision fixture copied successfully on the base and is rejected before copying now. The minimal fixture and opaque metadata remain supported. Other strict candidates remain unmeasured; `unsound-return-statement`, `unused-ignore-comment`, and `ANN401` each had zero diagnostics and no qualifying witness. No new escape hatches were introduced. No remote update, plan, or live provider work was run.
+
 ## Tickets
 
 
-### DSLP-3 · P2 · Types: measure and adopt a witnessed strict profile
-
-- **Area:** deslop · types
-- **Where:** pyproject.toml; tools/; tests/
-- **Problem:** The measured ty missing-type-argument rule reports 10 bare dict uses at unchecked JSON boundaries; unsound-return-statement, unused-ignore-comment and Ruff ANN401 report zero. None has a qualifying defect witness yet, and the remaining strict candidates are unmeasured.
-- **Recommendation:** After the release and vendor boundary tickets are resolved, measure remaining candidates and adopt only rules meeting the deslop evidence bar, with a negative checker witness for each; run make test, make lint and the exact checker witnesses.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-4 · P2 · Tests: coverage, boundary gaps, mutation
 
@@ -46,14 +40,6 @@ Release types (DSLP-7) at base `e28f70241025b396fab6d2fc78a0ee62a1bd71a2`: `uv r
 
 
 
-### DSLP-8 · P2 · Types: establish the vendor manifest contract
-
-- **Area:** deslop · types · vendor
-- **Where:** tools/vendor.py:50; tools/build.sh:31; tools/intercom.py:56; tests/vendor_test.py:20
-- **Problem:** Five missing-type-argument diagnostics mark vendor functions accepting decoded or caller-provided mappings. load checks only part of the manifest; materialize also accepts a smaller fixture without schema, repository, ref or version. Both build.sh and intercom.py pass json.loads directly, so a full typed manifest would assert unvalidated data.
-- **Recommendation:** Establish sound contracts for each consumer without losing accepted inputs or formats, including both materialize callers and the partial fixture; add a negative checker witness. Any malformed-data behavior change needs a sealed fail-before fixture and separate commit. Run make test, make lint and ty with missing-type-argument enabled.
-- **Fix with:** typing-audit
-- **Effort:** M
 
 
 ### DSLP-6 · P3 · Companion verification accepts duplicate package kinds
