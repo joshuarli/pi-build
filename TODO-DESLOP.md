@@ -55,9 +55,9 @@ python3.15 -c 'from pathlib import Path; p=Path(".work/tmp/vendor-defect/tools/v
 (cd .work/tmp/vendor-defect && uv run --project ../../.. --frozen pytest -p no:cacheprovider tests/vendor_test.py::VendorTests::test_parse_preserves_opaque_manifest_fields)
 ```
 
-Release merge mutation slice at base `62de40605a700bc356be71eda90c0b1a9a8ce27f`: on Darwin arm64, uv's Python 3.15.2, mutmut 3.8.1 and pytest 9.2.0, one worker selected exactly `tools.release.x_merge__mutmut_1`, `_10`–`_19`, and `_100`–`_199` (111 identities). Generated mutant files compared equal (`cmp`, exit 0). Baseline: 92 killed and 19 survived (13–15, 105, 108, 110–113, 124, 126, 153, 158–160, 179, 180, 192, 193). Candidate: 106 killed and 5 survived (13–15, 105, 160). Both had zero timeouts, suspicious, skipped, no-tests, or other selected outcomes. The progress denominator 323 includes unselected module mutants. Runs exited 0 in 12.81 s and 7.48 s respectively under a 120 s cap; these durations are not performance claims.
+Release merge mutation slice at base `62de40605a700bc356be71eda90c0b1a9a8ce27f`: on Darwin arm64 with Python 3.15.2, mutmut 3.8.1 and pytest 9.2.0, the same full function selection generated 250 `tools.release.x_merge__mutmut_*` identities. Generated mutant files compared equal. The baseline caught 209 and left 41 live. The new fixtures caught 223 and left 27 live. Both runs completed under the 120-second cap with one mutation worker and no other selected outcomes. The 323-identity progress denominator includes other functions.
 
-The added real-asset cases independently reject incorrect archive size and digest, symlinked target archive and manifest, malformed companion records, and a missing companion kind. They kill 108, 110–113, 124, 126, 153, 158, 159, 179, 180, 192, and 193. Survivors 13–15 alter the unsupported-schema error text, 105 removes the unexpected-archive-name error text, and 160 changes separators in the companion error text; these remain open, with no equivalence claim. Unselected merge mutations, CLI, other tools and DSLP-4 boundaries remain open. The fixture exercises all three configured target triples and `full`; existing tests also exercise `headless-usr`. No release build or installer was exercised.
+The added real-asset cases independently reject incorrect archive size and digest, symlinked target archive and manifest, malformed companion records, and a missing companion kind. They catch IDs 108, 110–113, 124, 126, 153, 158, 159, 179, 180, 192 and 193. IDs 2, 3, 4, 13–15, 31, 37, 78, 81, 105, 160, 200, 201, 205, 206, 211, 212, 220, 225, 229, 234, 237, 239, 240, 242 and 250 remain live. The fixture exercises all three configured target triples and `full`; existing tests exercise `headless-usr`. CLI, other functions, and native release execution remain open.
 
 Reproduce in fresh empty scratch directories from this candidate (the baseline is sealed from the base commit):
 
@@ -72,7 +72,7 @@ done
 git show 62de40605a700bc356be71eda90c0b1a9a8ce27f:tests/release_test.py > "$TMPDIR/release-baseline/tests/release_test.py"
 cp tests/release_test.py "$TMPDIR/release-candidate/tests/release_test.py"
 for run in baseline candidate; do
-  (cd "$TMPDIR/release-$run" && python3.15 -c 'import os,signal,subprocess,sys,time; t=time.monotonic(); p=subprocess.Popen(["cpu-guard","--cores","2","--","uv","run","--project","../../..","--frozen","--with","mutmut==3.8.1","--with","pytest==9.2.0","mutmut","run","--max-children","1","*merge__mutmut_1*"],start_new_session=True)
+  (cd "$TMPDIR/release-$run" && python3.15 -c 'import os,signal,subprocess,sys,time; t=time.monotonic(); p=subprocess.Popen(["cpu-guard","--cores","2","--","uv","run","--project","../../..","--frozen","--with","mutmut==3.8.1","--with","pytest==9.2.0","mutmut","run","--max-children","1","*x_merge__mutmut_*"],start_new_session=True)
 try: code=p.wait(timeout=120)
 except subprocess.TimeoutExpired: os.killpg(p.pid,signal.SIGTERM); p.wait(); code=124
 print(f"elapsed={time.monotonic()-t:.2f} exit={code}",flush=True); sys.exit(code)')
