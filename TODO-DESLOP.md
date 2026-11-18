@@ -411,6 +411,36 @@ leave `PREPARE_LOCKS=0`. Linux artifact and musl-loader results
 remain in progress independently. The local checks used fixture
 providers and did not publish artifacts or exercise two-host Intercom.
 
+Vendor update publication at `d0dfb9caa52259981c3e522c49b4ce579d60b03b`
+reproduced a failed installed-file check after the new manifest and
+snapshots had already replaced their originals. The fixture uses two
+disposable source directories, stubbed Git calls and real filesystem
+renames. A controlled change to the second installed file makes byte
+verification fail. Before the repair the changed manifest and both
+new snapshots remain. The candidate checks the installed inventory
+before replacing the manifest, while backups are still available.
+The same verification fault and an interruption during verification
+restore the exact original trees and manifest.
+
+The ordinary fixtures cover valid ref choice, preflight checks,
+an invalid upstream revision, empty inventory, a failed second
+checkout, nested copies, output JSON and both rename failure points.
+All 211 final `update` identities were classified with mutmut 3.8.1
+and pytest 9.2.0. The suite catches 206. IDs 31, 33, 35 and 36 alter
+only the private staging prefix within the same parent and the
+temporary tree is removed on every tested outcome. ID 148 uppercases
+`package.json` and survives on the casefolding macOS volume. Its
+Linux mutation outcome is unmeasured.
+
+Use a fresh scratch directory with `tools/vendor.py`,
+`tests/vendor_update_test.py`, and `mutants/.work/tmp`. Set
+`source_paths = ["tools/"]` and
+`pytest_add_cli_args_test_selection = ["tests/vendor_update_test.py"]`.
+Select `tools.vendor.x_update__mutmut_*` with one worker under the
+established timeout. The controller operates solely on local
+fixtures in this test. Native releases and real upstream updates
+are separate from these transactional checks.
+
 ## Tickets
 
 
