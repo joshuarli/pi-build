@@ -1,13 +1,15 @@
 import hashlib
+import io
 import json
 import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.archive import archive, validate_members, verify
+from tools.archive import archive, unpack, validate_members, verify
 
 
 class ArchiveTests(unittest.TestCase):
@@ -108,6 +110,92 @@ class ArchiveTests(unittest.TestCase):
             ])
         with self.assertRaisesRegex(ValueError, "dangling"):
             validate_members([self.symlink("node_modules/a", "b")])
+
+    def test_unpack_preserves_inventory_and_validates_before_filter_handoff(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory)
+            source = root / "fixture.tar.xz"
+            destination = root / "output"
+            names = ["node_modules", "node_modules/example", "node_modules/example/main.js",
+                     "node_modules/example/alias.js", "node_modules/example/chain.js"]
+            with tarfile.open(source, "w:xz") as bundle:
+                for name in names:
+                    member = tarfile.TarInfo(name)
+                    member.uid = member.gid = member.mtime = 0
+                    member.uname = member.gname = ""
+                    member.mode = 0o755 if name in names[:2] else 0o644
+                    if name in names[:2]:
+                        member.type = tarfile.DIRTYPE
+                    elif name.endswith("main.js"):
+                        member.size = 7
+                    else:
+                        member.type = tarfile.SYMTYPE
+                        member.linkname = "main.js" if name.endswith("alias.js") else "alias.js"
+                    bundle.addfile(member, io.BytesIO(b"content") if member.size else None)
+            original = tarfile.TarFile.extractall
+            handoffs = []
+
+            def extract_and_record(bundle, path, members):
+                handoffs.append((path, [member.name for member in members]))
+                return original(bundle, path, members=members)
+
+            with patch.object(tarfile.TarFile, "extractall", extract_and_record):
+                unpack(source, destination)
+            self.assertEqual(handoffs, [(destination, names)])
+            self.assertEqual((destination / names[2]).read_bytes(), b"content")
+            self.assertEqual((destination / names[3]).readlink(), Path("main.js"))
+            self.assertEqual((destination / names[4]).readlink(), Path("alias.js"))
+            self.assertEqual(sorted(str(path.relative_to(destination)) for path in destination.rglob("*")), sorted(names))
+
+            with tarfile.open(source, "w:xz") as bundle:
+                for _ in range(2):
+                    bundle.addfile(tarfile.TarInfo("node_modules/example"))
+            with patch.object(tarfile.TarFile, "extractall") as extract:
+                with self.assertRaisesRegex(ValueError, "duplicate archive member"):
+                    unpack(source, root / "rejected")
+                extract.assert_not_called()
+
+    def test_member_inventory_rejects_conflicts_and_accepts_resolved_links(self):
+        valid = [tarfile.TarInfo("node_modules/example/file"),
+                 self.symlink("node_modules/example/alias", "file"),
+                 self.symlink("node_modules/example/chain", "alias")]
+        self.assertIsNone(validate_members(valid))
+        directory = tarfile.TarInfo("node_modules/example/folder")
+        directory.type = tarfile.DIRTYPE
+        self.assertIsNone(validate_members([directory]))
+        special = tarfile.TarInfo("node_modules/example/special")
+        special.type = tarfile.FIFOTYPE
+        cases = [
+            ("duplicate archive member: node_modules/example/file", [valid[0], valid[0]]),
+            ("unsafe archive member: node_modules/example/special", [special]),
+            ("unsafe archive member: ", [tarfile.TarInfo("")]),
+            ("unsafe archive member: docs/README", [tarfile.TarInfo("docs/README")]),
+            ("unsafe archive member: node_modules/docs/../README", [tarfile.TarInfo("node_modules/docs/../README")]),
+            ("archive member traverses symlink parent: node_modules/example/link/second/child", [
+                self.symlink("node_modules/example/link", "file"), valid[0],
+                tarfile.TarInfo("node_modules/example/link/second/child"),
+            ]),
+            ("dangling archive link: node_modules/example/alias", [self.symlink("node_modules/example/alias", "missing")]),
+            ("cyclic archive link: node_modules/example/a", [
+                self.symlink("node_modules/example/a", "b"), self.symlink("node_modules/example/b", "a"),
+            ]),
+        ]
+        for message, members in cases:
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as error:
+                    validate_members(members)
+                self.assertEqual(str(error.exception), message)
+
+    def test_unpack_requires_xz_compression_before_creating_destination(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory)
+            source = root / "fixture.tar.xz"
+            with tarfile.open(source, "w:gz") as bundle:
+                bundle.addfile(tarfile.TarInfo("node_modules/example/README"))
+            destination = root / "output"
+            with self.assertRaises(tarfile.ReadError):
+                unpack(source, destination)
+            self.assertFalse(destination.exists())
 
     @staticmethod
     def symlink(name, target):
