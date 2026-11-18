@@ -244,6 +244,36 @@ and `tools.vendor.x_git_blob_sha__mutmut_*`. Compare the corresponding
 `exit_code_by_key` entries in `mutants/tools/vendor.py.meta`.
 No upstream update, native build or live provider activity ran.
 
+Archive validation at `8e4bad55de577a49eb58bd013384596056df9f19`
+selected the same 85 validator and unpack identities. The base caught
+73. The candidate caught 84 in mutmut, including every unpack
+identity. Direct member metadata tests check the exact diagnostic
+for each link boundary without extracting those fixtures.
+
+The remaining validator ID 67 has an independent local control.
+Changing `seen.add(target)` to `seen.add(None)` in a sealed source
+copy makes a bounded subprocess test exit 1 with `TimeoutExpired`.
+The intact validator reports the cycle from the incoming chain.
+Mutmut's parent-process run still reports this identity as surviving
+because the isolated subprocess imports a fresh module. Keep the
+explicit fault control with the mutation receipt.
+
+Use the prior validator and unpack recipe with this base and the
+checked tests. For the independent fault control, copy only
+`tools/archive.py` and `tests/archive_test.py` into a new scratch
+tree with `.work/tmp`, make the stated edit there, and run
+`uv run --project ../../.. --locked pytest -p no:cacheprovider -q tests/archive_test.py::ArchiveTests::test_member_validator_reports_a_chain_leading_into_a_cycle`.
+The controlling test timeout is two seconds. No real archive is written
+by the cycle test.
+
+Coverage now collects subprocess data with the existing pinned tool.
+On the same 40-test suite, this records all 13 pack statements and
+seven size statements that were absent from the parent-only report.
+With the final 42-test suite, `make coverage` reports 329 of 534
+statements and 140 of 214 branches. It erases old data and combines
+the parent and subprocess data before writing the JSON report.
+Both linters and the scoped fleet policy checks passed.
+
 ## Tickets
 
 

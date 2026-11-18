@@ -43,7 +43,9 @@ test:
 
 coverage:
 	mkdir -p .work/tmp/coverage
+	uv run --locked coverage erase
 	uv run --locked coverage run -m pytest tests
+	uv run --locked coverage combine
 	uv run --locked coverage report
 	uv run --locked coverage json -o .work/tmp/coverage/coverage.json
 

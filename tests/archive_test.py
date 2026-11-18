@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -8,7 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 from tools.archive import archive, unpack, validate_members, verify
 
 
@@ -185,6 +187,38 @@ class ArchiveTests(unittest.TestCase):
                 with self.assertRaises(ValueError) as error:
                     validate_members(members)
                 self.assertEqual(str(error.exception), message)
+
+    def test_member_validator_names_links_outside_the_member_namespace(self):
+        name = "node_modules/example/alias"
+        for target in ("/fixture/item", "../../..", "../../../fixture"):
+            with self.subTest(target=target):
+                with self.assertRaises(ValueError) as result:
+                    validate_members([self.symlink(name, target)])
+                self.assertEqual(str(result.exception), f"unsafe archive link: {name}")
+
+    def test_member_validator_reports_a_chain_leading_into_a_cycle(self):
+        program = """
+import tarfile
+from tools.archive import validate_members
+
+members = []
+for name, target in (("a", "b"), ("b", "c"), ("c", "b")):
+    item = tarfile.TarInfo(f"node_modules/example/{name}")
+    item.type = tarfile.SYMTYPE
+    item.linkname = target
+    members.append(item)
+
+try:
+    validate_members(members)
+except ValueError as error:
+    print(error)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", program], cwd=ROOT, check=True,
+            capture_output=True, text=True, timeout=2,
+        )
+        self.assertEqual(result.stdout, "cyclic archive link: node_modules/example/a\n")
+        self.assertEqual(result.stderr, "")
 
     def test_unpack_requires_xz_compression_before_creating_destination(self):
         with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
