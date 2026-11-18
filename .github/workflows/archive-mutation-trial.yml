@@ -1,0 +1,50 @@
+name: Pi archive record mutation trial
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+      - run: uv python install 3.15
+      - name: Exercise the archive records on a case-sensitive filesystem
+        shell: bash -euo pipefail {0}
+        run: |
+          export TMPDIR="$PWD/.work/tmp"
+          mkdir -p "$TMPDIR"
+          candidate=$(mktemp -d "$TMPDIR/archive-mutmut.XXXXXX")
+          git archive HEAD | tar -xf - -C "$candidate"
+          cd "$candidate"
+          export TMPDIR="$PWD/.work/tmp"
+          mkdir -p "$TMPDIR"
+          test ! -e TOOLS
+          cat >>pyproject.toml <<'TOML'
+
+          [tool.mutmut]
+          source_paths = ["tools/"]
+          only_mutate = ["tools/archive.py"]
+          pytest_add_cli_args_test_selection = ["tests/archive_test.py"]
+          also_copy = ["sources.lock.json", "sources/upstreams.json"]
+          TOML
+          timeout 120s uv run --frozen --with mutmut==3.8.1 --with pytest==9.2.0 python -m mutmut run --max-children 1 'tools.archive.x__inventory__mutmut_*' 'tools.archive.x__assemble__mutmut_*' 'tools.archive.x_verify__mutmut_*'
+          uv run --frozen python - <<'PY'
+          import json
+          from pathlib import Path
+          all_results = json.loads(Path("mutants/tools/archive.py.meta").read_text())["exit_code_by_key"]
+          keys = ("tools.archive.x__inventory__mutmut_", "tools.archive.x__assemble__mutmut_", "tools.archive.x_verify__mutmut_")
+          results = {key: code for key, code in all_results.items() if key.startswith(keys)}
+          surviving = {key: code for key, code in results.items() if code != 1}
+          print(f"{len(results)} identities, {len(results) - len(surviving)} caught, remaining {surviving}")
+          assert len(results) == 120 and not surviving
+          PY
