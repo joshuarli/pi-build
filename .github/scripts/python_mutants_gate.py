@@ -26,13 +26,22 @@ TESTS = {
 }
 SOURCES = {f"tools/{module}.py": module for module in TESTS}
 SHARED = {
-    "Makefile", "pyproject.toml", "uv.lock", ".github/workflows/ci.yml",
-    ".github/workflows/python-change-trial.yml", ".github/scripts/python_change_trial.py",
+    ".gitignore", "Makefile", "pyproject.toml", "uv.lock",
+    "bootstrap.lock.json", "sources.lock.json", ".github/workflows/ci.yml",
+    ".github/workflows/lint.yml", ".github/workflows/prepare-locks.yml", ".github/workflows/release.yml",
+    ".github/workflows/python-mutation.yml", ".github/scripts/python_mutants_gate.py",
     ".github/scripts/python_mutation_receipts.json",
 }
 CLIS = {
     PACKAGE_TEST: tuple((f'TOOLS / "{name}.py"', f'ROOT / "cli-proof/{name}.py"') for name in ("fetch", "pack", "sizes")),
     VENDOR_TEST: (('ROOT / "tools/vendor.py", "--help"', 'ROOT / "cli-proof/vendor.py", "--help"'),),
+}
+BUILD_TOOLS = {
+    "tools/build.sh", "tools/compile-devin.mjs", "tools/headless.mjs", "tools/patch-pi-help.mjs",
+    "tools/test-intercom.mjs", "tools/toolchain.sh", "tools/verify-companions.mjs",
+    "tools/verify-providers.mjs", "tools/verify.mjs",
+    "tests/intercom-tailnet-policy.test.mjs", "tests/intercom-tailnet-transport.test.mjs",
+    "tests/pi-help.test.mjs", "tests/verify-companions.test.mjs",
 }
 CYCLE = "tools.archive.x_validate_members__mutmut_67"
 
@@ -48,9 +57,7 @@ def select(changes: dict[str, str]) -> set[str]:
             selected.add(SOURCES[path])
             if path == "tools/vendor.py":
                 selected.add("intercom")
-        elif path in SHARED:
-            selected.update(TESTS)
-        elif path == "sources.lock.json":
+        elif path in SHARED or path in BUILD_TOOLS or path.startswith(("locks/", "patches/", "overlays/")):
             selected.update(TESTS)
         elif path.startswith("sources/"):
             selected.update(("archive", "intercom", "vendor"))
@@ -108,7 +115,7 @@ def verify_archive_cycle(directory: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
          f"{ARCHIVE_TEST}::ArchiveTests::test_member_validator_reports_a_chain_leading_into_a_cycle"],
-        cwd=directory, capture_output=True, text=True, timeout=15,
+        cwd=directory, capture_output=True, text=True, check=False, timeout=15,
     )
     if result.returncode != 1 or "subprocess.TimeoutExpired" not in result.stdout:
         raise ValueError(f"bounded archive cycle control did not fail as expected:\n{result.stdout}{result.stderr}")
@@ -125,7 +132,7 @@ def main() -> None:
     assert spec is not None and spec.loader is not None
     gate = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gate)
-    gate.ROOT = ROOT
+    gate.__dict__["ROOT"] = ROOT
     selected = set(TESTS) if args.all_python else select(gate.git_changes(args.base))
     print("selected Python modules", sorted(selected), flush=True)
     receipts = gate.load_json(ROOT / ".github/scripts/python_mutation_receipts.json")

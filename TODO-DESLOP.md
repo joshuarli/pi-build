@@ -523,6 +523,31 @@ the callable entry point. No upstream network operation ran in these
 fixtures. Whole-change and broader first-party shell and JS coverage
 remain separate from the Python module proof.
 
+The changed-path Python trial at `5b4ed9807eb92877efc3ad17b218f4b9a2394010`
+accounted for all 1,427 identities on Linux ARM64. Mutmut caught 1,404.
+The bounded archive cycle fault failed separately and 22 equivalents
+matched their recorded source and mutation digests. The mutation and
+cycle checks took about 102 seconds from selection to final disposition.
+[Hosted full Python run](https://github.com/joshuarli/pi-build/actions/runs/44339905806)
+
+The actual pull-request controls selected zero modules for documentation,
+rejected a new unqualified Python path and caught the archive test
+deletion when it appeared alone and alongside a sizes source change.
+The mixed event completed all 268 archive and 31 sizes identities
+before reporting the archive survivor `x_archive__mutmut_6`.
+[Documentation](https://github.com/joshuarli/pi-build/actions/runs/44340108850) ·
+[Unknown path](https://github.com/joshuarli/pi-build/actions/runs/44340206093) ·
+[Deletion](https://github.com/joshuarli/pi-build/actions/runs/44340262550) ·
+[Mixed change](https://github.com/joshuarli/pi-build/actions/runs/44340128560)
+
+`make mutants-diff BASE=<commit>` is the normal entry point. It uses
+the mirrored, locked mutmut and the pinned Buildlib diff and result
+readers. Run on a case-sensitive filesystem. The gate runs complete
+named Python modules and selects their dependent modules and tests.
+Changes to the build tools, workflow, locks and overlays select all
+seven modules. Native profile, companion and Intercom checks exercise
+the corresponding runtime behavior.
+
 ## Tickets
 
 
@@ -531,8 +556,8 @@ remain separate from the Python module proof.
 
 - **Area:** deslop · tests
 - **Where:** test suites and CI
-- **Problem:** Coverage and mutation results are unmeasured; no deslop mutation lane exists.
-- **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
+- **Problem:** The two-host Intercom qualification and final checked-head test-cost comparison remain open.
+- **Recommendation:** Verify the retained Python mutation gate and run the two-host procedure in `docs/verification/intercom-tailnet.md`.
 - **Fix with:** deslop
 - **Effort:** L
 
