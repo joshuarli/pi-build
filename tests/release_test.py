@@ -6,6 +6,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TypedDict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.release import TARGETS, merge, write
@@ -18,8 +19,21 @@ COMPANIONS = {
 }
 
 
-def write_companions(assets: Path) -> dict:
-    companions = {}
+class FixturePart(TypedDict):
+    schema: int
+    builder_revision: str
+    profile: str
+    product: str
+    version: str
+    sources_sha256: str
+    components: dict[str, str]
+    companions: dict[str, dict[str, str | int]]
+    targets: dict[str, dict[str, str | int]]
+    inputs: dict[str, object]
+
+
+def write_companions(assets: Path) -> dict[str, dict[str, str | int]]:
+    companions: dict[str, dict[str, str | int]] = {}
     for name, version in COMPANIONS.items():
         member = tarfile.TarInfo("package/package.json")
         payload = json.dumps({"name": name, "version": version}).encode()
@@ -40,7 +54,7 @@ def write_companions(assets: Path) -> dict:
     return companions
 
 
-def part(assets: Path, target: str, revision: str = REVISION, profile: str = "full") -> dict:
+def part(assets: Path, target: str, revision: str = REVISION, profile: str = "full") -> FixturePart:
     archive = assets / f"pi-{profile}-1.5.0-{target}.tar.xz"
     archive.write_bytes(target.encode())
     sha256 = hashlib.sha256(target.encode()).hexdigest()
@@ -80,6 +94,15 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual([entry for entry in sums if entry[1] == record["archive"]], [[record["sha256"], record["archive"]]])
         self.assertEqual([entry[1] for entry in sums], sorted(path.name for path in self.assets.iterdir() if path.name != "SHA256SUMS"))
 
+    def test_preserves_opaque_input_metadata_and_serialized_shape(self):
+        parts = [part(self.assets, target) for target in TARGETS]
+        parts[0]["inputs"][TARGETS[0]] = {"nested": [None, True, 42, {"arbitrary": "value"}]}
+        expected = {key: value for key, value in parts[0].items() if key not in ("targets", "inputs")}
+        expected["targets"] = {target: part["targets"][target] for target, part in zip(TARGETS, parts)}
+        expected["inputs"] = {target: part["inputs"][target] for target, part in zip(TARGETS, parts)}
+        write(self.assets, merge(self.assets, parts))
+        self.assertEqual((self.assets / "provenance.json").read_text(), json.dumps(expected, indent=2, sort_keys=True) + "\n")
+
     def test_rejects_targets_built_at_different_revisions(self):
         parts = [part(self.assets, target) for target in TARGETS[:2]] + [part(self.assets, TARGETS[2], "b" * 40)]
         with self.assertRaisesRegex(ValueError, "builder_revision differs"):
@@ -106,6 +129,18 @@ class ReleaseTests(unittest.TestCase):
         parts[0]["targets"]["aarch64-apple-darwin"]["builder_revision"] = REVISION
         with self.assertRaisesRegex(ValueError, "invalid target record"):
             merge(self.assets, parts)
+
+    def test_rejects_target_record_with_non_string_archive(self):
+        parts = [part(self.assets, target) for target in TARGETS]
+        parts[0]["targets"][TARGETS[0]]["archive"] = 1
+        with self.assertRaisesRegex(ValueError, "invalid target record"):
+            merge(self.assets, parts)
+
+    def test_rejects_non_string_shared_identity(self):
+        part_with_bad_identity: dict[str, object] = dict(part(self.assets, TARGETS[0]))
+        part_with_bad_identity["product"] = 1
+        with self.assertRaisesRegex(TypeError, "invalid provenance identity"):
+            merge(self.assets, [part_with_bad_identity])
 
 
 if __name__ == "__main__":
