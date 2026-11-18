@@ -98,7 +98,8 @@ def edit(root: Path, case: str) -> set[str]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("engine", type=Path)
-    parser.add_argument("case", choices=("positive", "deletion", "mixed", "docs", "unknown"))
+    parser.add_argument("case", choices=("event", "positive", "deletion", "mixed", "docs", "unknown"))
+    parser.add_argument("--base")
     args = parser.parse_args()
     spec = importlib.util.spec_from_file_location("buildlib_gate", args.engine)
     assert spec is not None and spec.loader is not None
@@ -106,11 +107,17 @@ def main() -> None:
     spec.loader.exec_module(gate)
     with tempfile.TemporaryDirectory(prefix="archive-trial-", dir=os.environ["TMPDIR"]) as scratch:
         root = Path(scratch)
-        base = seal(root)
-        expected = edit(root, args.case)
-        gate.ROOT = root
-        changes = gate.git_changes(base)
-        assert set(changes) == expected, changes
+        if args.case == "event":
+            if args.base is None:
+                parser.error("--base is required when checking a pull request")
+            gate.ROOT = ROOT
+            changes = gate.git_changes(args.base)
+        else:
+            base = seal(root)
+            expected = edit(root, args.case)
+            gate.ROOT = root
+            changes = gate.git_changes(base)
+            assert set(changes) == expected, changes
         print(args.case, "changed paths", sorted(changes), flush=True)
         if args.case == "unknown":
             try:
@@ -121,11 +128,14 @@ def main() -> None:
                 return
             raise AssertionError("an unsupported path was accepted")
         selected = select(changes)
-        assert selected == (set() if args.case == "docs" else {SOURCE}), selected
+        if args.case != "event":
+            assert selected == (set() if args.case == "docs" else {SOURCE}), selected
         print("selected", sorted(selected), flush=True)
         if not selected:
             return
 
+        if args.case == "event":
+            seal(root)
         (root / "mutants/sources").mkdir(parents=True)
         (root / "mutants/.work/tmp").mkdir(parents=True)
         (root / ".work/tmp").mkdir(parents=True)
@@ -139,7 +149,7 @@ def main() -> None:
         print("tested", len(results), "identities", flush=True)
         if args.case == "mixed":
             assert any(name.startswith("tools.archive.x_digest__mutmut_") for name in results)
-        else:
+        elif args.case != "event":
             assert len(results) == 268
         receipt = json.loads((ROOT / ".github/scripts/archive_mutation_receipt.json").read_text())
         approved = gate.qualified_survivors(root / SOURCE, artifact, spans, "tools.archive.", receipt)

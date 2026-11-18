@@ -17,11 +17,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        control: [positive, deletion, mixed, docs, unknown]
+        control: [event, positive, deletion, mixed, docs, unknown]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: laputa-systems/buildlib
@@ -34,7 +35,10 @@ jobs:
       - run: uv python install 3.15
       - run: |
           export TMPDIR="$PWD/.work/tmp"
+          export UV_PROJECT_ENVIRONMENT="$PWD/.work/venv"
           mkdir -p "$TMPDIR"
-          uv run --frozen --with mutmut==3.8.1 --with pytest==9.2.0 python .github/scripts/archive_change_trial.py "$PWD/.work/engine/scripts/mutants_gate.py" "$CONTROL"
+          printf '%s\n' '.work/' >> .git/info/exclude
+          uv run --frozen --with mutmut==3.8.1 --with pytest==9.2.0 python .github/scripts/archive_change_trial.py "$PWD/.work/engine/scripts/mutants_gate.py" "$CONTROL" --base "$BASE_SHA"
         env:
           CONTROL: ${{ matrix.control }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
