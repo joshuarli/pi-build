@@ -55,6 +55,43 @@ python3.15 -c 'from pathlib import Path; p=Path(".work/tmp/vendor-defect/tools/v
 (cd .work/tmp/vendor-defect && uv run --project ../../.. --frozen pytest -p no:cacheprovider tests/vendor_test.py::VendorTests::test_parse_preserves_opaque_manifest_fields)
 ```
 
+Release merge mutation slice at base `62de40605a700bc356be71eda90c0b1a9a8ce27f`: on Darwin arm64 with Python 3.15.2, mutmut 3.8.1 and pytest 9.2.0, the same full function selection generated 250 `tools.release.x_merge__mutmut_*` identities. Generated mutant files compared equal. The baseline caught 209 and left 41 live. The new fixtures caught 223 and left 27 live. Both runs completed under the 120-second cap with one mutation worker and no other selected outcomes. The 323-identity progress denominator includes other functions.
+
+The added real-asset cases independently reject incorrect archive size and digest, symlinked target archive and manifest, malformed companion records, and a missing companion kind. They catch IDs 108, 110–113, 124, 126, 153, 158, 159, 179, 180, 192 and 193. IDs 2, 3, 4, 13–15, 31, 37, 78, 81, 105, 160, 200, 201, 205, 206, 211, 212, 220, 225, 229, 234, 237, 239, 240, 242 and 250 remain live. The fixture exercises all three configured target triples and `full`; existing tests exercise `headless-usr`. CLI, other functions, and native release execution remain open.
+
+Reproduce in fresh empty scratch directories from this candidate (the baseline is sealed from the base commit):
+
+```sh
+export TMPDIR="$PWD/.work/tmp" UV_PROJECT_ENVIRONMENT="$PWD/.work/venv" UV_CACHE_DIR="$PWD/.work/tmp/uv-cache"
+mkdir -p "$TMPDIR"
+for run in baseline candidate; do
+  mkdir -p "$TMPDIR/release-$run/tools" "$TMPDIR/release-$run/tests" "$TMPDIR/release-$run/mutants/.work/tmp"
+  git show 62de40605a700bc356be71eda90c0b1a9a8ce27f:tools/release.py > "$TMPDIR/release-$run/tools/release.py"
+  printf '[tool.mutmut]\nsource_paths = ["tools/"]\npytest_add_cli_args_test_selection = ["tests/release_test.py"]\n' > "$TMPDIR/release-$run/pyproject.toml"
+done
+git show 62de40605a700bc356be71eda90c0b1a9a8ce27f:tests/release_test.py > "$TMPDIR/release-baseline/tests/release_test.py"
+cp tests/release_test.py "$TMPDIR/release-candidate/tests/release_test.py"
+for run in baseline candidate; do
+  (cd "$TMPDIR/release-$run" && python3.15 -c 'import os,signal,subprocess,sys,time; t=time.monotonic(); p=subprocess.Popen(["cpu-guard","--cores","2","--","uv","run","--project","../../..","--frozen","--with","mutmut==3.8.1","--with","pytest==9.2.0","mutmut","run","--max-children","1","*x_merge__mutmut_*"],start_new_session=True)
+try: code=p.wait(timeout=120)
+except subprocess.TimeoutExpired: os.killpg(p.pid,signal.SIGTERM); p.wait(); code=124
+print(f"elapsed={time.monotonic()-t:.2f} exit={code}",flush=True); sys.exit(code)')
+done
+cmp "$TMPDIR/release-baseline/mutants/tools/release.py" "$TMPDIR/release-candidate/mutants/tools/release.py"
+```
+
+An independent fault changed the target archive size comparison to compare the recorded size with itself in a scratch copy. The focused command below exited 1: `ValueError not raised` for the `bytes` subtest. `make test` exited 0 (21 passed); `make lint` exited 0 (Ruff and ty passed).
+
+```sh
+mkdir -p "$TMPDIR/release-defect/tools" "$TMPDIR/release-defect/tests"
+cp tools/release.py "$TMPDIR/release-defect/tools/release.py"
+cp tests/release_test.py "$TMPDIR/release-defect/tests/release_test.py"
+python3.15 -c 'from pathlib import Path; p=Path(".work/tmp/release-defect/tools/release.py"); s=p.read_text(); old="archive.stat().st_size != record[\"bytes\"]"; assert s.count(old)==2; p.write_text(s.replace(old,"record[\"bytes\"] != record[\"bytes\"]",1))'
+(cd "$TMPDIR/release-defect" && uv run --project ../../.. --frozen pytest -p no:cacheprovider -q tests/release_test.py::ReleaseTests::test_rejects_archive_size_or_digest_mismatch_independently)
+make test
+make lint
+```
+
 ## Tickets
 
 
