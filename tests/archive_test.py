@@ -60,6 +60,45 @@ class ArchiveTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "identity"):
                 verify(root / "first.tar.xz", root / "bad.json", "aarch64-apple-darwin", "full")
 
+    def test_real_asset_record_inventory_and_verification(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory)
+            modules = root / "input/node_modules"
+            package = modules / "@scope/example"
+            package.mkdir(parents=True)
+            (package / "index.js").write_bytes(b"abc")
+            (package / "extra.js").write_bytes(b"12345")
+            other = modules / "other"
+            other.mkdir()
+            (other / "main.js").write_bytes(b"hello!")
+            (other / "alias.js").symlink_to("main.js")
+            output = root / "nested/output/asset.tar.xz"
+            manifest = archive(root / "input", output, "pi-full", "1.5.0", "aarch64-apple-darwin", "full", "a" * 40)
+            manifest_file = output.parent / "pi-full-1.5.0-aarch64-apple-darwin.manifest.json"
+            self.assertEqual(json.loads(manifest_file.read_text()), manifest)
+            self.assertEqual(manifest["archive"], "asset.tar.xz")
+            self.assertEqual(manifest["bytes"], len(output.read_bytes()))
+            self.assertEqual(manifest["sha256"], hashlib.sha256(output.read_bytes()).hexdigest())
+            self.assertEqual(manifest["source_manifest_sha256"], hashlib.sha256(Path("sources/upstreams.json").read_bytes()).hexdigest())
+            self.assertEqual(manifest["packages"], {"@scope/example": 8, "other": 6})
+            with tarfile.open(output, "r:xz") as bundle:
+                self.assertTrue(all(member.mtime == 0 for member in bundle.getmembers()))
+            self.assertEqual(verify(output, manifest_file, "aarch64-apple-darwin", "full"), manifest)
+            for field, value in (("bytes", manifest["bytes"] + 1), ("sha256", "0" * 64)):
+                with self.subTest(field=field):
+                    invalid = {**manifest, field: value}
+                    manifest_file.write_text(json.dumps(invalid))
+                    with self.assertRaisesRegex(ValueError, "^archive digest or size mismatch$"):
+                        verify(output, manifest_file, "aarch64-apple-darwin", "full")
+            gzip_path = root / "asset.tar.gz"
+            with tarfile.open(output, "r:xz") as source, tarfile.open(gzip_path, "w:gz") as compressed:
+                for member in source:
+                    compressed.addfile(member, source.extractfile(member) if member.isfile() else None)
+            invalid = {**manifest, "bytes": gzip_path.stat().st_size, "sha256": hashlib.sha256(gzip_path.read_bytes()).hexdigest()}
+            manifest_file.write_text(json.dumps(invalid))
+            with self.assertRaises(tarfile.ReadError):
+                verify(gzip_path, manifest_file, "aarch64-apple-darwin", "full")
+
     def test_archive_paths_reject_symlink_parent_and_dangling_chain(self):
         with self.assertRaisesRegex(ValueError, "symlink parent"):
             validate_members([

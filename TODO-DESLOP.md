@@ -136,6 +136,46 @@ uppercases the provenance filename. The case-sensitive Linux ARM64 trial at
 All 31 ordinary tests, Ruff and ty passed.
 [Hosted run](https://github.com/joshuarli/pi-build/actions/runs/44309118302)
 
+The archive asset-record slice at base `3b1869d51cddf255a37de7c1ee525ade6b6f31c7` uses Darwin ARM64, Python 3.15.2, mutmut 3.8.1 and pytest 9.2.0. Both sealed runs selected the same 120 identities: `tools.archive.x__inventory__mutmut_1`–`_30`, `x__assemble__mutmut_1`–`_52`, and `x_verify__mutmut_1`–`_38`. The generated mutant sources compare equal. The baseline killed 103 and left 17 live; the candidate killed 116 and left 4 live. There were zero timeouts, suspicious, skipped, no-test or other selected results. Both runs exited 0 in 5.39 seconds, with one worker and a two-core cap; each had a 120-second hard budget.
+
+The new local asset fixture catches inventory and manifest record omissions, nonzero member timestamps, missing parent creation, independent size and digest mismatches, and non-xz input. Baseline survivors caught were assemble IDs 1, 3, 5, 13, 31, 32, 43, 44; verify IDs 19, 29, 30, 31, 35. Remaining inventory ID 5 and assemble IDs 30 and 48 uppercase filesystem paths and survive on this case-insensitive host; they remain open for a case-sensitive native trial. Verify ID 17 adds `XX` around an otherwise intact identity error; it is diagnostic decoration, not an asset correctness gap. No accepted risk or equivalent exclusion is claimed for the three platform-dependent cases. Archive validation, unpacking, CLI, other archive decisions, and native artifact qualification remain open; this slice does not close DSLP-4.
+
+Reproduce from the committed candidate in new, empty scratch directories:
+
+```sh
+export TMPDIR="$PWD/.work/tmp" UV_PROJECT_ENVIRONMENT="$PWD/.work/venv" UV_CACHE_DIR="$PWD/.work/tmp/uv-cache"
+for run in baseline candidate; do
+  mkdir -p "$TMPDIR/archive-$run/tools" "$TMPDIR/archive-$run/tests" "$TMPDIR/archive-$run/sources" "$TMPDIR/archive-$run/mutants/sources" "$TMPDIR/archive-$run/mutants/.work/tmp"
+  git show 3b1869d51cddf255a37de7c1ee525ade6b6f31c7:tools/archive.py > "$TMPDIR/archive-$run/tools/archive.py"
+  printf '{"fixture": "lock"}\n' | tee "$TMPDIR/archive-$run/sources.lock.json" > "$TMPDIR/archive-$run/mutants/sources.lock.json"
+  printf '{"fixture": "sources"}\n' | tee "$TMPDIR/archive-$run/sources/upstreams.json" > "$TMPDIR/archive-$run/mutants/sources/upstreams.json"
+  printf '[tool.mutmut]\nsource_paths = ["tools/"]\npytest_add_cli_args_test_selection = ["tests/archive_test.py"]\n' > "$TMPDIR/archive-$run/pyproject.toml"
+done
+git show 3b1869d51cddf255a37de7c1ee525ade6b6f31c7:tests/archive_test.py > "$TMPDIR/archive-baseline/tests/archive_test.py"
+cp tests/archive_test.py "$TMPDIR/archive-candidate/tests/archive_test.py"
+for run in baseline candidate; do
+  (cd "$TMPDIR/archive-$run" && python3.15 -c 'import os,signal,subprocess,sys,time; t=time.monotonic(); p=subprocess.Popen(["cpu-guard","--cores","2","--","uv","run","--project","../../..","--frozen","--with","mutmut==3.8.1","--with","pytest==9.2.0","mutmut","run","--max-children","1","*verify__mutmut_*","*inventory__mutmut_*","*assemble__mutmut_*"],start_new_session=True)
+try: code=p.wait(timeout=120)
+except subprocess.TimeoutExpired: os.killpg(p.pid,signal.SIGTERM); p.wait(); code=124
+print(f"elapsed={time.monotonic()-t:.2f} exit={code}",flush=True); sys.exit(code)')
+done
+cmp "$TMPDIR/archive-baseline/mutants/tools/archive.py" "$TMPDIR/archive-candidate/mutants/tools/archive.py"
+```
+
+The independent fault below disables the size comparison in a scratch copy. The focused test exits 1 with `ValueError not raised` on the `bytes` subtest. The unmodified full `make test` exits 0 with 32 passed; `make lint` exits 0 with Ruff and ty passing.
+
+```sh
+mkdir -p "$TMPDIR/archive-defect/tools" "$TMPDIR/archive-defect/tests" "$TMPDIR/archive-defect/sources" "$TMPDIR/archive-defect/.work/tmp"
+cp tools/archive.py "$TMPDIR/archive-defect/tools/archive.py"
+cp tests/archive_test.py "$TMPDIR/archive-defect/tests/archive_test.py"
+cp "$TMPDIR/archive-baseline/sources.lock.json" "$TMPDIR/archive-defect/sources.lock.json"
+cp "$TMPDIR/archive-baseline/sources/upstreams.json" "$TMPDIR/archive-defect/sources/upstreams.json"
+python3.15 -c 'from pathlib import Path; p=Path(".work/tmp/archive-defect/tools/archive.py"); s=p.read_text(); old="manifest[\"bytes\"] != Path(archive_path).stat().st_size"; assert s.count(old)==1; p.write_text(s.replace(old, "manifest[\"bytes\"] != manifest[\"bytes\"]"))'
+(cd "$TMPDIR/archive-defect" && uv run --project ../../.. --frozen pytest -p no:cacheprovider -q tests/archive_test.py::ArchiveTests::test_real_asset_record_inventory_and_verification)
+make test
+make lint
+```
+
 ## Tickets
 
 
