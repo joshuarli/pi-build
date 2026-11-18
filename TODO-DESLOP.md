@@ -369,6 +369,48 @@ survivor hashes. The sealed deletion, mixed, docs-only and unknown
 controls passed their expected outcomes. The archive gate remains a
 draft while wider scopes and final fleet retention are qualified.
 
+The complete Intercom Python module inventory at
+`d0dfb9caa52259981c3e522c49b4ce579d60b03b` selected the same 157
+function mutations. The prior suite caught 97, missed 25 and did not
+execute 35. The candidate caught 156. The remaining
+`x_prepare__mutmut_30` uppercases the manifest path on a casefolding
+volume. The intact fixture passed on case-sensitive x86-64 and ARM64
+Linux, and the exact uppercase fault failed with `FileNotFoundError`
+on both in the [artifact trial](https://github.com/joshuarli/pi-build/actions/runs/44331458109).
+The preparation fixtures verify real snapshot copying and stop on an
+altered source before calling the patch runner. The CLI checks cover
+all three commands, help and the required operation.
+
+Use the preceding Intercom mutation recipe, now copying
+`tools/vendor.py` and adding `only_mutate = ["tools/intercom.py"]`
+and `also_copy = ["tools/vendor.py"]`. Select `tools.intercom.*`.
+The trial's manifest control uses a separate bytecode cache after
+changing the filename. All 57 ordinary tests and both linters passed.
+
+Both Pi 1.5.0 artifact profiles built and passed `make verify` on
+macOS ARM64 at `992b70926ed50de0a4b9da317edaa57856e9d101`.
+The toolchain installation verified Node 26.13.0, npm 12.2.2,
+Python 3.15.1 and jaq 3.1.2 from the committed locks. Both archives
+passed identity and SHA-256 checks, packaged CLI help, four offline
+extensions, four fixture provider interfaces and all three companion
+checks. Headless additionally rejects Bedrock explicitly. A separate
+headless build ran `tools/build.sh` with a fresh work path and an
+output of the same name under `.work/tmp`; `cmp` and SHA-256 matched.
+The checkout and committed locks stayed clean.
+
+| Profile | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Full | 20,821,692 | `4b502f3cd85c294869f0bc5375414cec5bbcc3296ef43953713e522cf129dd6f` |
+| Headless | 12,808,876 | `c04d0e08aa7451c3695a0451b27fd9191c966bacf041251fa021557547f8ea3c` |
+
+Reproduce with the output of `sh tools/toolchain.sh aarch64-apple-darwin`
+first on `PATH` and the returned Python passed to
+`make build verify TARGET=aarch64-apple-darwin PROFILE=<profile> PYTHON=<builder-python>`.
+Use the documented npm remote policy for the pinned packages and
+leave `PREPARE_LOCKS=0`. Linux artifact and musl-loader results
+remain in progress independently. The local checks used fixture
+providers and did not publish artifacts or exercise two-host Intercom.
+
 ## Tickets
 
 
