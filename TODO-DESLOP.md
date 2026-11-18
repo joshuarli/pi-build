@@ -332,6 +332,43 @@ The [trial workflow](https://github.com/joshuarli/pi-build/blob/b58334330e367f9e
 contains the exact commands and selection. Native build and wider
 vendor and gate work remain in DSLP-4.
 
+Intercom overlay helpers at
+`992b70926ed50de0a4b9da317edaa57856e9d101` had no prior coverage
+in the ordinary Python suite. The new fixtures catch all 88 identities
+in `inputs`, `digest` and `apply` with mutmut 3.8.1 and pytest 9.2.0.
+They verify ordered patch bytes, the path-bound digest, nested copies,
+missing inputs, destination admission and refusal to overwrite a copied
+source. Skipping the path component in the digest in a scratch copy
+makes the digest test fail on the exact hash. The pinned 31-test
+Intercom run above supplies separate real patch and socket evidence.
+
+Reproduce from a scratch tree with `tools/intercom.py`,
+`tests/intercom_overlay_test.py`, and `mutants/.work/tmp`.
+Set `source_paths = ["tools/"]` and
+`pytest_add_cli_args_test_selection = ["tests/intercom_overlay_test.py"]`.
+Select `tools.intercom.x_inputs__mutmut_*`,
+`tools.intercom.x_digest__mutmut_*`, and
+`tools.intercom.x_apply__mutmut_*`. Compare the selected result codes
+in `mutants/tools/intercom.py.meta`. The ordinary suite passed and
+Ruff and ty passed. Full mutation of prepare and command routing
+remains open.
+
+The archive changed-path trial's
+[actual PR run](https://github.com/joshuarli/pi-build/actions/runs/44328375342)
+at `026813440675ae323d93f3e5e8d43d541b2d8b95` used the event's
+base revision. It selected the archive after classifying the three
+gate files and passed the 268 identities with the bounded cycle
+control. The actual [mixed PR control](https://github.com/joshuarli/pi-build/pull/29)
+at `84e04299011828cf332fb401e3abf0fb5fcd9bd4` changed only the
+archive source and its test against the trial branch. Both ordinary
+checks passed. The
+[event gate](https://github.com/joshuarli/pi-build/actions/runs/44328802243/job/134887247586)
+checked 269 identities and failed on the removed profile test's
+`x_archive__mutmut_6`. The source edit also invalidated the old
+survivor hashes. The sealed deletion, mixed, docs-only and unknown
+controls passed their expected outcomes. The archive gate remains a
+draft while wider scopes and final fleet retention are qualified.
+
 ## Tickets
 
 
