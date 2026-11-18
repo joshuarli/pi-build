@@ -72,3 +72,5 @@ The npm 12 builder may require `npm_config_allow_remote=all` when its remote-pac
 Runtime account entitlement and live provider calls require separate verification. A deterministic repeat build proves identical bytes for the tested target and inputs only.
 
 See [headless runtime verification](docs/verification/headless-usr.md) for the size comparison, tested behaviors, and remaining delivery work.
+
+The documentation-only fixture changes no build input.
