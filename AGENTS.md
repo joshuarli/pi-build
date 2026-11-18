@@ -11,5 +11,6 @@
 - The Python coverage report covers all seven tracked `tools/*.py` files, including unimported files. It is informational, not a gate; coverage does not establish assertion strength.
 - `make test-intercom` compiles patched sources and exercises the broker and client policy and transport. It can require npm and sockets.
 - `make verify` exercises an existing archive, packaged CLI and help, extensions, providers, and companions. `make repro` rebuilds and compares artifacts. See [intercom verification](docs/verification/intercom-tailnet.md) for the two-host procedure.
+- `make test-companions` uses local tar files to check companion package identity and inventory without building Pi. The regular test workflow runs it alongside the Python suite.
 - The campaign scope covers build and release tooling. It has no identified runtime workload for a performance gate.
 - `sources/upstreams.json` lists each bundled tree's repository and revision. `sources.lock.json` records toolchain URLs and digests.

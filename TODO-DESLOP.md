@@ -486,6 +486,14 @@ there. Isolated subprocesses then use the real CLI without requiring
 mutmut while the two direct calls exercise the instrumented bodies.
 Use one mutation worker and inspect both `exit_code_by_key` maps.
 
+Companion inventory (DSLP-6) now requires one Claude, one Codex, and
+one OpenCode archive and matches each manifest name to its filename.
+The fixture with three valid Claude archives and the fixture with a
+Codex package named as Claude both exited successfully before this
+change. They now exit 1. Missing OpenCode exits 1 before any companion
+is accepted. The complete fixture and the actual companion archives in
+both macOS profiles pass. Run `make test-companions` for the four fixtures.
+
 ## Tickets
 
 
@@ -507,18 +515,3 @@ Use one mutation worker and inspect both `exit_code_by_key` maps.
 - **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
 - **Fix with:** deslop
 - **Effort:** M
-
-
-
-
-
-
-### DSLP-6 · P3 · Companion verification accepts duplicate package kinds
-
-- **Area:** Build verification
-- **Where:** tools/verify-companions.mjs:8; Makefile:30; tools/build.sh:109
-- **Problem:** The verifier counts three matching filenames but does not require one of each companion or match package names to filenames. A benign local fixture with Claude archives at versions 1.0.0, 1.0.1, and 1.0.2, each containing a matching package.json and valid index.js, makes `node tools/verify-companions.mjs` exit 0 and print three successes while Codex and OpenCode are absent. Stale versioned files can remain in dist because builds copy new archives without clearing that directory. This makes the companion part of make verify misleading; release.py separately checks the provenance companion keys and recorded files, so this reproduction does not establish a published release failure.
-- **Recommendation:** Require exactly one archive for each expected companion and verify each package name matches its archive kind; add a local fixture covering duplicates and missing kinds.
-- **Fix with:** root-cause
-- **Effort:** S
-
