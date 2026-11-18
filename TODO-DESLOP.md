@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 7
+Next: 9
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -9,15 +9,17 @@ Ground (DSLP-1) passed at base `442f463954a6ead8fb9223f8c148bcc4c1bc66cf`. [Veri
 
 Diagnose (DSLP-2) reviewed first-party `tools/`, packaging metadata, and their tests and docs at `2c6108836ae36c494174e6b76d745f647491df22`. A local companion fixture demonstrated DSLP-6 (P3); the release merge separately checks recorded companion files. The 11-test local baseline passed. No other issue was confirmed within this scope. Release builds, live providers, tailnet operations, upstream sources, and cross-repository behavior were not exercised; review did not establish that those paths are defect-free.
 
+Types (DSLP-3) at `0c5b3c3057e73d89099dc2beea82711b1c8e876b`: ty 0.0.101 reports 10 `missing-type-argument` diagnostics, split into release and vendor boundary work below. `unsound-return-statement`, `unused-ignore-comment`, and Ruff 0.17.4 `ANN401` each report zero. No setting was adopted: the former remains blocked on sound contracts and the others have no qualifying witness. Other candidates remain unmeasured. The Python escape-hatch search in `tools/` and `tests/` found zero matches before and after; no typing changes were made.
+
 ## Tickets
 
 
-### DSLP-3 · P2 · Types: strict profile and typing findings
+### DSLP-3 · P2 · Types: measure and adopt a witnessed strict profile
 
 - **Area:** deslop · types
-- **Where:** type checker and lint configuration; Python/TypeScript sources
-- **Problem:** The strict-profile candidates in the deslop skill's tools reference have not been measured here.
-- **Recommendation:** Run the deslop Types step. Accept: clean at the adopted profile, escape hatches not increased, witnesses recorded.
+- **Where:** pyproject.toml; tools/; tests/
+- **Problem:** The measured ty missing-type-argument rule reports 10 bare dict uses at unchecked JSON boundaries; unsound-return-statement, unused-ignore-comment and Ruff ANN401 report zero. None has a qualifying defect witness yet, and the remaining strict candidates are unmeasured.
+- **Recommendation:** After the release and vendor boundary tickets are resolved, measure remaining candidates and adopt only rules meeting the deslop evidence bar, with a negative checker witness for each; run make test, make lint and the exact checker witnesses.
 - **Fix with:** deslop
 - **Effort:** M
 
@@ -37,6 +39,26 @@ Diagnose (DSLP-2) reviewed first-party `tools/`, packaging metadata, and their t
 - **Problem:** No dead-code scan has run.
 - **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
 - **Fix with:** deslop
+- **Effort:** M
+
+
+### DSLP-7 · P2 · Types: establish the release provenance contract
+
+- **Area:** deslop · types · release
+- **Where:** tools/release.py:24; tools/build.sh:165; tests/release_test.py:43
+- **Problem:** merge and write use bare dict annotations while merge reads decoded provenance and preserves shared values and inputs without establishing their full shape; the build produces nested inputs, while tests use smaller input records. Five missing-type-argument diagnostics include the test producers. A TypedDict fed by json.loads would assert an unchecked contract.
+- **Recommendation:** Trace accepted provenance and buildlib consumers, preserve existing formats and accepted inputs, then establish a sound boundary and a negative checker witness. Any malformed-data behavior change needs a sealed fail-before fixture and separate commit. Run make test, make lint and ty with missing-type-argument enabled.
+- **Fix with:** typing-audit
+- **Effort:** M
+
+
+### DSLP-8 · P2 · Types: establish the vendor manifest contract
+
+- **Area:** deslop · types · vendor
+- **Where:** tools/vendor.py:50; tools/build.sh:31; tools/intercom.py:56; tests/vendor_test.py:20
+- **Problem:** Five missing-type-argument diagnostics mark vendor functions accepting decoded or caller-provided mappings. load checks only part of the manifest; materialize also accepts a smaller fixture without schema, repository, ref or version. Both build.sh and intercom.py pass json.loads directly, so a full typed manifest would assert unvalidated data.
+- **Recommendation:** Establish sound contracts for each consumer without losing accepted inputs or formats, including both materialize callers and the partial fixture; add a negative checker witness. Any malformed-data behavior change needs a sealed fail-before fixture and separate commit. Run make test, make lint and ty with missing-type-argument enabled.
+- **Fix with:** typing-audit
 - **Effort:** M
 
 
