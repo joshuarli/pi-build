@@ -11,7 +11,7 @@ MANIFEST := dist/$(PROFILE)/$(STEM).manifest.json
 REPRO := .work/repro/$(TARGET)/$(STEM).tar.xz
 VERIFY_ROOT := .work/verify/$(TARGET)/$(PROFILE)
 
-.PHONY: prepare build verify repro sizes test test-intercom lint clean
+.PHONY: prepare build verify repro sizes test coverage test-intercom lint clean
 prepare:
 	PREPARE_LOCKS=1 $(NODE) --version
 	PREPARE_LOCKS=1 PYTHON="$(PYTHON)" bash tools/build.sh "$(TARGET)" "$(PROFILE)" "$(BUILD)" "$(ARTIFACT)" "$(VERSION)"
@@ -40,6 +40,12 @@ sizes:
 test:
 	mkdir -p .work/tmp
 	uv run --locked pytest tests
+
+coverage:
+	mkdir -p .work/tmp/coverage
+	uv run --locked coverage run -m pytest tests
+	uv run --locked coverage report
+	uv run --locked coverage json -o .work/tmp/coverage/coverage.json
 
 test-intercom:
 	PYTHON="$(PYTHON)" $(NODE) tools/test-intercom.mjs

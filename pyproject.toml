@@ -15,11 +15,17 @@ package = false
 
 [dependency-groups]
 dev = [
+    "coverage==7.17.3",
     "pytest==9.2.0",
     "ruff==0.17.4",
     "ty==0.0.101",
     "uv==0.13.7",
 ]
+
+[tool.coverage.run]
+source = ["tools"]
+branch = true
+data_file = ".work/tmp/coverage/.coverage"
 
 [tool.ruff]
 target-version = "py315"
