@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 9
+Next: 10
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -602,11 +602,33 @@ two-host procedure is tracked below.
 [Mutation run](https://github.com/joshuarli/pi-build/actions/runs/44343948188) ·
 [Default CI](https://github.com/joshuarli/pi-build/actions/runs/44344579001)
 
+The final build-tools check-up used a fresh clone at
+`266f21b5c010ed1775a7698db0dd72e9f53b14d4`. The locked ordinary
+and instrumented runs each passed all 77 Python tests. Coverage
+measured 512 of 540 statements and 215 of 224 branches. All four
+companion fixtures and both linters passed. The fleet checks for the
+test workflow, coverage target, strict profile and mutation lane
+returned no findings. Both default workflows passed at the checked
+revision. The source, fixtures, workflow and lock match the earlier
+1,434-identity mutation run. The qualified paired test-cost receipt
+remains at `0da2614b`.
+
+For the check-up control, run
+`node --test --test-name-pattern 'rejects an archive containing a different package name' tests/verify-companions.test.mjs`
+in a fresh checkout. In a disposable copy, replace
+`pkg.name !== expectedName` in `tools/verify-companions.mjs` with
+`false`. The matching test fails because the wrong package exits 0
+instead of 1. The unchanged checkout passes.
+
+The build-tools Tests, Dead code and cumulative review are complete.
+The enrolled-host Intercom procedure remains an owner ticket.
+
 ## Tickets
 
 
 
-### DSLP-4 · P2 · Verify Intercom across two enrolled hosts
+
+### DSLP-9 · P2 · Verify Intercom across two enrolled hosts
 
 - **Area:** Needs owner · Intercom environment
 - **Where:** docs/verification/intercom-tailnet.md, Actual tailnet and harness acceptance
