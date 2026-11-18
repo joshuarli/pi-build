@@ -1,0 +1,40 @@
+name: archive changed-path trial
+
+on: pull_request
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  control:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 6
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        control: [positive, deletion, mixed, docs, unknown]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: laputa-systems/buildlib
+          ref: 1497970d9454a6a9875b1f201cbaad71fd92a010
+          path: .work/engine
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: 0.13.7
+      - run: uv python install 3.15
+      - run: |
+          export TMPDIR="$PWD/.work/tmp"
+          mkdir -p "$TMPDIR"
+          uv run --frozen --with mutmut==3.8.1 --with pytest==9.2.0 python .github/scripts/archive_change_trial.py "$PWD/.work/engine/scripts/mutants_gate.py" "$CONTROL"
+        env:
+          CONTROL: ${{ matrix.control }}

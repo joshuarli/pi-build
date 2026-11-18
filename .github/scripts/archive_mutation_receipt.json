@@ -1,0 +1,12 @@
+{
+  "source_sha256": "ffa6b6b6af2bdd8ab351b04d57c519289323d323360f9f93d51f394b1019a0f8",
+  "survivors": [
+    "tools.archive.x_archive__mutmut_14=869bf34be2c3c0356795fcd430cb9f66b13afbf154dd2dbcc516b7f37e5b4748",
+    "tools.archive.x_archive__mutmut_16=4dbe6897d2b754b8a5fe1b39fc784dee3f15a4171b9fc662297f5e8c61107e4b",
+    "tools.archive.x_archive__mutmut_18=131472d91a6ae7899ffc149c1237ab9c38258718cde45332fb2ca42adf623f9e",
+    "tools.archive.x_archive__mutmut_19=3669925e6e156a1e618e5853782664afa8b7388e8be3f49064b7a78f0a7e5602",
+    "tools.archive.x_archive__mutmut_23=e78a3e471801530d14cab33648e43657fdccc318f74df29cd10f5d831cce1508",
+    "tools.archive.x_archive__mutmut_24=adb846c42253754caecd810441afe4ecd717f1f38007635edc087517078ff356",
+    "tools.archive.x_validate_members__mutmut_67=0e54e46664902e1a9b97f4047284faf85d2f91a184b013817e566b7a1e9c1daa"
+  ]
+}
