@@ -1,0 +1,50 @@
+{
+  "archive": {
+    "source_sha256": "ffa6b6b6af2bdd8ab351b04d57c519289323d323360f9f93d51f394b1019a0f8",
+    "survivors": [
+      "tools.archive.x_archive__mutmut_14=869bf34be2c3c0356795fcd430cb9f66b13afbf154dd2dbcc516b7f37e5b4748",
+      "tools.archive.x_archive__mutmut_16=4dbe6897d2b754b8a5fe1b39fc784dee3f15a4171b9fc662297f5e8c61107e4b",
+      "tools.archive.x_archive__mutmut_18=131472d91a6ae7899ffc149c1237ab9c38258718cde45332fb2ca42adf623f9e",
+      "tools.archive.x_archive__mutmut_19=3669925e6e156a1e618e5853782664afa8b7388e8be3f49064b7a78f0a7e5602",
+      "tools.archive.x_archive__mutmut_23=e78a3e471801530d14cab33648e43657fdccc318f74df29cd10f5d831cce1508",
+      "tools.archive.x_archive__mutmut_24=adb846c42253754caecd810441afe4ecd717f1f38007635edc087517078ff356",
+      "tools.archive.x_validate_members__mutmut_67=0e54e46664902e1a9b97f4047284faf85d2f91a184b013817e566b7a1e9c1daa"
+    ]
+  },
+  "fetch": {
+    "source_sha256": "1fb73966877d7d888e9d997e2aef97631588bc2f720fb2563cc90c7e43888a23",
+    "survivors": [
+      "tools.fetch.x_main__mutmut_29=660287083f6635044e3be23edcc5114c6e3f5ec81e64040158cb751af064d68b",
+      "tools.fetch.x_main__mutmut_36=54f2e42fde3fc61bbecb34b1a28ff0ea6ca8c411d19a088d816b48a07344a99e",
+      "tools.fetch.x_main__mutmut_37=87df1a59d7bf044a17b4cd32cf6fd4efa0321e7520b1257b71ea9662b04068bb"
+    ]
+  },
+  "pack": {
+    "source_sha256": "bdea6098dbc96e75893e8332ce0eafcefe151d2dd57fa5af39930e681ca6519d",
+    "survivors": [
+      "tools.pack.x_main__mutmut_13=8169dd326bf23e345c7a1977ace8d3053bcfbc8f5e1e792ff72c15d32cbcf080",
+      "tools.pack.x_main__mutmut_20=5fa4e00f4c9dfe260b850a63dc897d90e941b02ca135d29c7ebca9693359424c",
+      "tools.pack.x_main__mutmut_25=c7b826ef79c87ed7de763017c2a3fa24ee688004cd1c27e9f12cfe619b2fb98d",
+      "tools.pack.x_main__mutmut_36=a727c6d336c01be36217e742c723530377e7ef0eb4eede18fc15caaaf739a454",
+      "tools.pack.x_main__mutmut_39=dfd8da64115a9879e78d4d44853e6f46f5b961e7360411dc0abe6b6bd4c190f9"
+    ]
+  },
+  "release": {
+    "source_sha256": "c994367fada7d3c9c7cce20084a96e261f41e65becacaeee4ca7d86816a42b06",
+    "survivors": [
+      "tools.release.x_merge__mutmut_225=25f2bf9fb9fbf665d3ca1e2db0669b8a39e2f12c5879ebf5e63588652d236e56"
+    ]
+  },
+  "vendor": {
+    "source_sha256": "92facf77d129845182f3b6da09aff72a6331924ced4b451d526e024b144f6ed6",
+    "survivors": [
+      "tools.vendor.x_command__mutmut_6=f27793af2abffbf8e866f68e13aa3834a542c0970010bc5764b21a4db0dee0a9",
+      "tools.vendor.x_command__mutmut_11=99f78d053af7ffa42d2c0e8c46e834e990924f1e3a62bdeb10859c25ecc8f795",
+      "tools.vendor.x_update__mutmut_31=83b6952553e730a4aaf47546a716eb7c4a8be434f49b2266c0e39e252eaba256",
+      "tools.vendor.x_update__mutmut_33=aaeb29ea6fda41ef2340a3ca305a4d7e7bf76050b4a9526466734e18d9b37fb5",
+      "tools.vendor.x_update__mutmut_35=83d90bfc82029007b60ddc5e366ec06ec3cae55a35bca4703aa25a69e548a481",
+      "tools.vendor.x_update__mutmut_36=97a377831d99fa0c3802e4019086eac781c6c0bfc83db709003bb7707cc2f8f1",
+      "tools.vendor.x_main__mutmut_38=4fb9285b01a466a8f3af0136b677e53d2226012f45f7900e4c1adddd13d293e7"
+    ]
+  }
+}
