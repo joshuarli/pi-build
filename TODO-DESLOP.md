@@ -127,12 +127,14 @@ all five incorrectly typed target fields. The actual isolated Python script
 returned 2 and wrote usage to stderr with no positional arguments. Activating
 main ID 1 made the single-file success check fail with status 2.
 
-The full `tools/release.py` module generated the same 323 identities in two
-fresh scratch copies using the established mutmut setup with no selector.
+The full `tools/release.py` module generated the same 323 identities in
+independent scratch copies using the established mutmut setup with no selector.
 The base caught 287, with 7 live and 29 lacking tests. The candidate caught
 321. Merge ID 225 is equivalent for declared archive basenames. Main ID 28
-uppercases the provenance filename and needs a case-sensitive filesystem.
+uppercases the provenance filename. The case-sensitive Linux ARM64 trial at
+`74c13f1a` caught that identity, giving 322 caught and the same equivalent.
 All 31 ordinary tests, Ruff and ty passed.
+[Hosted run](https://github.com/joshuarli/pi-build/actions/runs/44309118302)
 
 ## Tickets
 
