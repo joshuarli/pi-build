@@ -1,3 +1,4 @@
+import gzip
 import hashlib
 import io
 import json
@@ -40,7 +41,10 @@ def write_companions(assets: Path) -> dict[str, dict[str, str | int]]:
         member.size = len(payload)
         member.mtime = 0
         buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w:gz") as bundle:
+        with (
+            gzip.GzipFile(fileobj=buffer, mode="wb", mtime=0) as compressed,
+            tarfile.open(fileobj=compressed, mode="w") as bundle,
+        ):
             bundle.addfile(member, io.BytesIO(payload))
         archive = assets / f"{name}-{version}.tgz"
         archive.write_bytes(buffer.getvalue())
@@ -103,13 +107,36 @@ class ReleaseTests(unittest.TestCase):
         write(self.assets, merge(self.assets, parts))
         self.assertEqual((self.assets / "provenance.json").read_text(), json.dumps(expected, indent=2, sort_keys=True) + "\n")
 
+    def test_rejects_unknown_provenance_envelope(self):
+        with self.assertRaisesRegex(ValueError, "^no provenance inputs$"):
+            merge(self.assets, [])
+        release_part = part(self.assets, TARGETS[0])
+        with self.assertRaisesRegex(ValueError, "^unsupported provenance schema$"):
+            merge(self.assets, [release_part | {"schema": 2}])
+        with self.assertRaisesRegex(TypeError, "^invalid provenance identity$"):
+            merge(self.assets, [release_part | {"builder_revision": None}])
+
+    def test_reports_the_inconsistent_target(self):
+        target = TARGETS[0]
+        release_part = part(self.assets, target)
+        with self.assertRaisesRegex(ValueError, f"^duplicate target {target}$"):
+            merge(self.assets, [release_part, release_part])
+        record = release_part["targets"][target]
+        record["target"] = TARGETS[1]
+        with self.assertRaisesRegex(ValueError, f"^invalid target record {target}$"):
+            merge(self.assets, [release_part])
+        record["target"] = target
+        record["archive"] = "unexpected.tar.xz"
+        with self.assertRaisesRegex(ValueError, f"^unexpected archive name for {target}$"):
+            merge(self.assets, [release_part])
+
     def test_rejects_targets_built_at_different_revisions(self):
         parts = [part(self.assets, target) for target in TARGETS[:2]] + [part(self.assets, TARGETS[2], "b" * 40)]
         with self.assertRaisesRegex(ValueError, "builder_revision differs"):
             merge(self.assets, parts)
 
     def test_rejects_incomplete_target_set(self):
-        with self.assertRaisesRegex(ValueError, "requires targets"):
+        with self.assertRaisesRegex(ValueError, f"^release requires targets {', '.join(TARGETS)}$"):
             merge(self.assets, [part(self.assets, target) for target in TARGETS[:2]])
 
     def test_rejects_archive_that_differs_from_its_record(self):
@@ -155,11 +182,70 @@ class ReleaseTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "invalid companion (record|size)"):
                     merge(self.assets, parts)
 
+    def companion_release(self):
+        parts = [part(self.assets, target) for target in TARGETS]
+        companions = parts[0]["companions"]
+        for package in parts:
+            package["companions"] = companions
+        name = "agent-intercom-claude"
+        return parts, name, companions[name], self.assets / f"{name}-{COMPANIONS[name]}.tgz"
+
+    def test_rejects_missing_symlinked_or_nested_companion_archive(self):
+        for representation in ("missing", "symlinked", "nested"):
+            with self.subTest(representation=representation):
+                parts, _, record, archive = self.companion_release()
+                if representation == "missing":
+                    archive.unlink()
+                elif representation == "symlinked":
+                    original = archive.with_suffix(".original")
+                    archive.rename(original)
+                    archive.symlink_to(original.name)
+                else:
+                    directory = self.assets / "nested"
+                    directory.mkdir()
+                    archive.rename(directory / archive.name)
+                    record["archive"] = f"nested/{archive.name}"
+                try:
+                    with self.assertRaisesRegex(ValueError, "^missing companion archive .*agent-intercom-claude"):
+                        merge(self.assets, parts)
+                finally:
+                    if archive.is_symlink():
+                        archive.unlink()
+
+    def test_rejects_companion_size_or_digest_mismatch_independently(self):
+        for field, wrong_value in (("bytes", 0), ("bytes", 1), ("sha256", "0" * 64)):
+            with self.subTest(field=field, wrong_value=wrong_value):
+                parts, name, record, _ = self.companion_release()
+                record[field] = wrong_value
+                if wrong_value == 0:
+                    diagnostic = f"^invalid companion size {name}$"
+                else:
+                    diagnostic = f"^companion archive digest or size mismatch: {name}$"
+                with self.assertRaisesRegex(ValueError, diagnostic):
+                    merge(self.assets, parts)
+
+    def test_companion_requires_a_nonempty_gzip_tar(self):
+        for mode in ("w", "w:gz"):
+            with self.subTest(mode=mode):
+                parts, name, record, archive = self.companion_release()
+                with tarfile.open(archive, mode) as bundle:
+                    if mode == "w":
+                        bundle.addfile(tarfile.TarInfo("package/README.md"))
+                data = archive.read_bytes()
+                record["bytes"] = len(data)
+                record["sha256"] = hashlib.sha256(data).hexdigest()
+                if mode == "w":
+                    with self.assertRaises(tarfile.ReadError):
+                        merge(self.assets, parts)
+                else:
+                    with self.assertRaisesRegex(ValueError, f"^companion archive is empty: {name}$"):
+                        merge(self.assets, parts)
+
     def test_rejects_missing_companion_kind(self):
         parts = [part(self.assets, target) for target in TARGETS]
         for item in parts:
             del item["companions"]["agent-intercom-claude"]
-        with self.assertRaisesRegex(ValueError, "release requires companions"):
+        with self.assertRaisesRegex(ValueError, f"^release requires companions {', '.join(COMPANIONS)}$"):
             merge(self.assets, parts)
 
     def test_rejects_target_record_with_extra_identity_fields(self):
