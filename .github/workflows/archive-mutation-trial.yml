@@ -29,6 +29,7 @@ jobs:
           export TMPDIR="$PWD/.work/tmp"
           mkdir -p "$TMPDIR"
           test ! -e TOOLS
+          mkdir -p mutants/sources mutants/.work/tmp
           cat >>pyproject.toml <<'TOML'
 
           [tool.mutmut]
