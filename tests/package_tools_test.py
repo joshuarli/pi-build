@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import subprocess
@@ -5,12 +6,87 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
-TOOLS = Path(__file__).resolve().parents[1] / "tools"
+ROOT = Path(__file__).resolve().parents[1]
+TOOLS = ROOT / "tools"
+sys.path.insert(0, str(ROOT))
+from tools import fetch
 
 
 class PackageToolsTests(unittest.TestCase):
+    def test_fetch_reuses_verified_inputs_in_requested_order(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory)
+            destination = root / "cache"
+            destination.mkdir()
+            lock = root / "sources.lock.json"
+            entries = []
+            cached = {}
+            for name, contents in (("first", b"fixture one"), ("second", b"fixture two")):
+                cached[name] = destination / f"{name}.datX"
+                cached[name].write_bytes(contents)
+                entries.append({
+                    "name": name, "version": "1", "size": len(contents),
+                    "sha256": hashlib.sha256(contents).hexdigest(),
+                    "url": f"https://example.invalid/pin/{cached[name].name}/",
+                })
+            lock.write_text(json.dumps({"schema_version": 1, "inputs": entries}))
+            args = ["fetch.py", str(lock), str(destination), "second", "first"]
+            before = {name: (path.read_bytes(), path.stat().st_mtime_ns) for name, path in cached.items()}
+            with (
+                patch.object(sys, "argv", args),
+                patch("urllib.request.urlopen", side_effect=AssertionError("network access")),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(fetch.main(), 0)
+            self.assertEqual(stdout.getvalue().splitlines(), [str(cached["second"]), str(cached["first"])])
+            self.assertEqual({name: (path.read_bytes(), path.stat().st_mtime_ns) for name, path in cached.items()}, before)
+
+            cached["first"].write_bytes(b"corrupt")
+            with (
+                patch.object(sys, "argv", args[:3] + ["first"]),
+                patch("urllib.request.urlopen", return_value=io.BytesIO(before["first"][0])) as download,
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(fetch.main(), 0)
+            self.assertEqual(download.call_count, 1)
+            self.assertEqual(cached["first"].read_bytes(), before["first"][0])
+            self.assertEqual(stdout.getvalue(), f"{cached['first']}\n")
+
+    def test_fetch_with_no_names_creates_the_requested_cache(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory)
+            destination = root / "new/cache"
+            lock = root / "sources.lock.json"
+            lock.write_text(json.dumps({"schema_version": 1, "inputs": []}))
+            with (
+                patch.object(sys, "argv", ["fetch.py", str(lock), str(destination)]),
+                patch("urllib.request.urlopen", side_effect=AssertionError("network access")),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(fetch.main(), 0)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertTrue(destination.is_dir())
+            self.assertEqual(list(destination.iterdir()), [])
+
+    def test_fetch_requires_a_lock_and_destination(self):
+        with patch.object(sys, "argv", ["fetch.py", "unused.lock"]), redirect_stderr(io.StringIO()) as stderr:
+            self.assertEqual(fetch.main(), 2)
+        self.assertIn("Usage: python tools/fetch.py SOURCES_LOCK DOWNLOAD_DIR", stderr.getvalue())
+
+        result = subprocess.run(
+            [sys.executable, "-I", TOOLS / "fetch.py"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("Usage: python tools/fetch.py SOURCES_LOCK DOWNLOAD_DIR", result.stderr)
+
     def test_pack_normalizes_metadata_and_order_without_changing_contents(self):
         with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
             root = Path(directory)
