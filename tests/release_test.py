@@ -107,6 +107,12 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid target record"):
             merge(self.assets, parts)
 
+    def test_rejects_target_record_with_non_string_archive(self):
+        parts = [part(self.assets, target) for target in TARGETS]
+        parts[0]["targets"][TARGETS[0]]["archive"] = 1
+        with self.assertRaisesRegex(ValueError, "invalid target record"):
+            merge(self.assets, parts)
+
 
 if __name__ == "__main__":
     unittest.main()
