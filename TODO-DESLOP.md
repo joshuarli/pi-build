@@ -307,6 +307,31 @@ with `EINVAL`. A short detached checkout at `.work/wt/ic` kept all
 scratch inside its `.work/tmp` and restored the pass. The separate
 two-host Intercom route remains unverified.
 
+The complete `tools/archive.py` function inventory at
+`70d898577315b500fe4282442faf6cde28244074` accounted for 268
+identities. Two fresh macOS runs generated the same production
+code. The base caught 251 and the candidate caught 258. The
+candidate exercises headless symlinks, profile identity, local
+staging cleanup and rejection of an unknown profile.
+
+The [case-sensitive Linux trial](https://github.com/joshuarli/pi-build/actions/runs/44324389230)
+at `b58334330e367f9e84db02c3f055fb5687c58e14` caught 261 of 268.
+It distinguished the three case-only mutations in the node_modules
+inventory, sources lock and upstream manifest paths. The committed
+source and test files match the trial byte for byte.
+
+The six `x_archive` survivors (14, 16, 18, 19, 23 and 24) change
+only names of staging directories within the same parent. None of
+those names is stored in the manifest or archive. The packaged file
+inventory, link target and cleanup still match the supported contract.
+The remaining `x_validate_members__mutmut_67` is covered by the
+separate bounded cycle control recorded above. That control covers the
+subprocess result outside the parent-process mutation count.
+
+The [trial workflow](https://github.com/joshuarli/pi-build/blob/b58334330e367f9e84db02c3f055fb5687c58e14/.github/workflows/full-archive-mutation-trial.yml)
+contains the exact commands and selection. Native build and wider
+vendor and gate work remain in DSLP-4.
+
 ## Tickets
 
 
