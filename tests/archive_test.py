@@ -57,7 +57,7 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(manifest["sources_lock_sha256"], hashlib.sha256(Path("sources.lock.json").read_bytes()).hexdigest())
             manifest["target"] = "x86_64-unknown-linux-musl"
             (root / "bad.json").write_text(json.dumps(manifest))
-            with self.assertRaisesRegex(ValueError, "identity"):
+            with self.assertRaisesRegex(ValueError, "^artifact identity mismatch$"):
                 verify(root / "first.tar.xz", root / "bad.json", "aarch64-apple-darwin", "full")
 
     def test_real_asset_record_inventory_and_verification(self):
