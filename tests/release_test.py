@@ -241,6 +241,22 @@ class ReleaseTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, f"^companion archive is empty: {name}$"):
                         merge(self.assets, parts)
 
+    def test_companion_archive_member_names_must_be_relative_and_normalized(self):
+        for member_name in ("/package/README.md", "package/docs/../README.md"):
+            with self.subTest(member=member_name):
+                parts, name, record, archive = self.companion_release()
+                with (
+                    gzip.GzipFile(filename=str(archive), mode="wb", mtime=0) as compressed,
+                    tarfile.open(fileobj=compressed, mode="w") as bundle,
+                ):
+                    bundle.addfile(tarfile.TarInfo(member_name))
+                data = archive.read_bytes()
+                record["bytes"] = len(data)
+                record["sha256"] = hashlib.sha256(data).hexdigest()
+                with self.assertRaises(ValueError) as error:
+                    merge(self.assets, parts)
+                self.assertEqual(str(error.exception), f"companion archive has unsafe member {member_name}: {name}")
+
     def test_rejects_missing_companion_kind(self):
         parts = [part(self.assets, target) for target in TARGETS]
         for item in parts:

@@ -109,6 +109,16 @@ file conditions. That path is unreachable for declared bare filenames. IDs
 237, 239, 240 and 242 remain open in archive-member validation. All 26 tests,
 Ruff and ty passed.
 
+
+The archive-member follow-up at `55eebda` rejects a rooted name and a parent
+component in otherwise sealed companion archives. The verifier only reads
+members in this fixture. Changing the requirement from either condition to
+both made the two rejections fail. With deterministic fixtures, 249 of the
+same 250 merge identities are caught, compared with 245 on the base. ID 225
+remains equivalent behind the basename check under the declared inputs.
+All 27 tests, Ruff and ty passed. Other release functions, archive tooling and
+native qualification remain open.
+
 ## Tickets
 
 
