@@ -274,6 +274,39 @@ statements and 140 of 214 branches. It erases old data and combines
 the parent and subprocess data before writing the JSON report.
 Both linters and the scoped fleet policy checks passed.
 
+The fetch command at `70d898577315b500fe4282442faf6cde28244074`
+now has tests for invalid arity, empty input requests, nested cache
+creation, URL basename selection, ordered output, reuse of good
+cached inputs and repair of a corrupt entry. The repair crosses
+Buildlib's real checksum and atomic write boundary with a local
+response fixture. Disconnecting that handoff in a sealed copy makes
+the test fail because the corrupt byte fixture is never repaired.
+
+Both mutation archives generated identical production code for all
+44 `fetch.main` identities. The original selection had no test
+executing those identities, so mutmut stopped with pending results.
+The candidate caught 41. IDs 29 and 36 return the same last slash
+segment regardless of how many right splits are allowed. ID 37 uses
+index `+1` in place of `-1`; one right split always gives two
+segments for a validated HTTPS URL with a host. These three are
+equivalent under the input contract.
+
+Use the archive mutation recipe's scratch structure. Copy
+`tools/fetch.py`, `tools/pack.py` and `tools/sizes.py` into each
+archive. Select `tests/package_tools_test.py` and
+`tools.fetch.x_main__mutmut_*` with `only_mutate = ["tools/fetch.py"]`
+and `also_copy = ["tools/pack.py", "tools/sizes.py"]`.
+Coverage now records all 18 fetch statements and six branches.
+
+The same revision's real fetch command obtained the locked Node
+26.13.0 executable archive. The existing local Intercom harness
+passed 31 tests with real Unix sockets and zero skips using that
+runtime and the pinned compiler lock. In a worktree with a longer
+`TMPDIR` prefix, the same fixture failed at Unix socket creation
+with `EINVAL`. A short detached checkout at `.work/wt/ic` kept all
+scratch inside its `.work/tmp` and restored the pass. The separate
+two-host Intercom route remains unverified.
+
 ## Tickets
 
 
