@@ -1,13 +1,17 @@
 import hashlib
+import io
+import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import call, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools import intercom
+from tools.vendor import git_blob_sha
 
 
 class IntercomOverlayTests(unittest.TestCase):
@@ -103,3 +107,88 @@ class IntercomOverlayTests(unittest.TestCase):
         (self.root / "patches/intercom-tailnet-policy.patch").unlink()
         with self.assertRaisesRegex(ValueError, "^Intercom patches and overlays must be regular files$"):
             intercom.digest(self.root)
+
+
+    def test_prepare_materializes_only_verified_snapshot_files(self):
+        name = "agent-intercom-core"
+        source = self.root / "sources" / name
+        source.mkdir(parents=True)
+        original = b"export const value = 1;\n"
+        script = source / "index.ts"
+        script.write_bytes(original)
+        (source / "notes.txt").write_bytes(b"outside inventory")
+        manifest = source.parent / "upstreams.json"
+        manifest.write_text(json.dumps({"sources": {name: {
+            "path": f"sources/{name}", "sha": "a" * 40, "files": {"index.ts": git_blob_sha(original)},
+        }}}))
+        prepared = self.destination / "prepared"
+
+        with (
+            patch.object(sys, "path", list(sys.path)),
+            patch.object(intercom.subprocess, "run") as execute,
+        ):
+            intercom.prepare(prepared, self.root)
+            self.assertEqual(sys.path[0], str(self.root))
+            self.assertEqual(execute.call_count, 2)
+            self.assertEqual((prepared / name / "index.ts").read_bytes(), original)
+            self.assertFalse((prepared / name / "notes.txt").exists())
+            self.assertEqual((prepared / "docs/topics/a.md").read_bytes(), b"first overlay")
+
+            execute.reset_mock()
+            script.write_bytes(b"changed")
+            rejected = self.destination / "rejected"
+            with self.assertRaisesRegex(ValueError, r"changed=\['index\.ts'\]"):
+                intercom.prepare(rejected, self.root)
+            execute.assert_not_called()
+            self.assertFalse(rejected.exists())
+
+    def test_prepare_rejects_the_work_root_and_paths_outside_it(self):
+        for destination in (self.root / ".work", self.root / "elsewhere"):
+            with (
+                self.subTest(destination=destination),
+                self.assertRaisesRegex(ValueError, r"^prepared Intercom sources must be under \.work$"),
+            ):
+                intercom.prepare(destination, self.root)
+
+    def test_cli_selects_the_requested_overlay_operation(self):
+        for command in ("apply", "prepare", "digest"):
+            args = ["intercom.py", command]
+            if command != "digest":
+                args.append(str(self.destination))
+            with (
+                self.subTest(command=command),
+                patch.object(sys, "argv", args),
+                patch.object(intercom, "apply") as apply,
+                patch.object(intercom, "prepare") as prepare,
+                patch.object(intercom, "digest", return_value="reviewed digest") as digest,
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                intercom.main()
+                for name, operation in (("apply", apply), ("prepare", prepare), ("digest", digest)):
+                    if name != command:
+                        operation.assert_not_called()
+                    elif name == "digest":
+                        operation.assert_called_once_with()
+                    else:
+                        operation.assert_called_once_with(self.destination)
+                self.assertEqual(output.getvalue(), "reviewed digest\n" if command == "digest" else "")
+
+
+    def test_cli_prints_help_and_requires_an_operation(self):
+        with (
+            patch.object(sys, "argv", ["intercom.py", "--help"]),
+            redirect_stdout(io.StringIO()) as output,
+            self.assertRaises(SystemExit) as exited,
+        ):
+            intercom.main()
+        self.assertEqual(exited.exception.code, 0)
+        self.assertIn("reviewed Intercom changes to a verified, disposable source tree", output.getvalue())
+
+        with (
+            patch.object(sys, "argv", ["intercom.py"]),
+            redirect_stderr(io.StringIO()) as errors,
+            self.assertRaises(SystemExit) as exited,
+        ):
+            intercom.main()
+        self.assertEqual(exited.exception.code, 2)
+        self.assertIn("the following arguments are required: command", errors.getvalue())
