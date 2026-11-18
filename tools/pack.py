@@ -3,7 +3,6 @@ import sys
 import tarfile
 from pathlib import Path
 
-
 source = Path(sys.argv[1])
 output = Path(sys.argv[2])
 with (
