@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -27,12 +28,22 @@ class ArchiveTests(unittest.TestCase):
                 path = package / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
+            (package / "alias.js").symlink_to("index.js")
             for profile in ("full", "headless-usr"):
                 output = root / f"{profile}.tar.xz"
-                manifest = archive(root / "input", output, f"pi-{profile}", "1.5.0", "aarch64-apple-darwin", profile, "a" * 40)
+                with patch("tools.archive.shutil.copytree", wraps=shutil.copytree) as copytree:
+                    manifest = archive(root / "input", output, f"pi-{profile}", "1.5.0", "aarch64-apple-darwin", profile, "a" * 40)
+                self.assertEqual(manifest["profile"], profile)
+                if profile == "headless-usr":
+                    staging_tree = copytree.call_args_list[0].args[1]
+                    self.assertEqual(staging_tree.parent.parent, root)
+                    self.assertFalse(staging_tree.parent.exists())
                 expected = {name: content for name, content in files.items()
                             if profile == "full" or not name.endswith((".map", ".d.ts", ".d.mts", ".d.cts"))}
                 with tarfile.open(output) as bundle:
+                    alias = bundle.getmember("node_modules/@scope/example/alias.js")
+                    self.assertTrue(alias.issym())
+                    self.assertEqual(alias.linkname, "index.js")
                     actual = {}
                     for member in bundle:
                         if member.isfile():
@@ -41,6 +52,14 @@ class ArchiveTests(unittest.TestCase):
                             actual[member.name.removeprefix("node_modules/@scope/example/")] = stream.read().decode()
                 self.assertEqual(actual, expected)
                 self.assertEqual(manifest["packages"], {"@scope/example": sum(len(value) for value in expected.values())})
+
+    def test_archive_rejects_unknown_profile_before_creating_output(self):
+        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
+            root = Path(directory)
+            output = root / "dist/asset.tar.xz"
+            with self.assertRaisesRegex(ValueError, "^unsupported profile: alternate$"):
+                archive(root / "source", output, "pi", "1.5.0", "aarch64-apple-darwin", "alternate", "a" * 40)
+            self.assertFalse(output.parent.exists())
 
     def test_same_tree_has_same_archive_and_manifest_identity(self):
         with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
