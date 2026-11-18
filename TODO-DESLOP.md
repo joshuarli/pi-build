@@ -119,6 +119,23 @@ remains equivalent behind the basename check under the declared inputs.
 All 27 tests, Ruff and ty passed. Other release functions, archive tooling and
 native qualification remain open.
 
+
+The release command slice at `d569e29` checks usage status and diagnostics,
+a combined or split set of provenance files, and the complete output digest
+and checksum inventory. The shape cases reject malformed provenance maps and
+all five incorrectly typed target fields. The actual isolated Python script
+returned 2 and wrote usage to stderr with no positional arguments. Activating
+main ID 1 made the single-file success check fail with status 2.
+
+The full `tools/release.py` module generated the same 323 identities in
+independent scratch copies using the established mutmut setup with no selector.
+The base caught 287, with 7 live and 29 lacking tests. The candidate caught
+321. Merge ID 225 is equivalent for declared archive basenames. Main ID 28
+uppercases the provenance filename. The case-sensitive Linux ARM64 trial at
+`74c13f1a` caught that identity, giving 322 caught and the same equivalent.
+All 31 ordinary tests, Ruff and ty passed.
+[Hosted run](https://github.com/joshuarli/pi-build/actions/runs/44309118302)
+
 ## Tickets
 
 

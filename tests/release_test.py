@@ -6,11 +6,12 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import TypedDict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.release import TARGETS, merge, write
+from tools.release import TARGETS, main, merge, object_mapping, write
 
 REVISION = "a" * 40
 COMPANIONS = {
@@ -97,6 +98,59 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(set(record), {"target", "profile", "archive", "sha256", "bytes"})
             self.assertEqual([entry for entry in sums if entry[1] == record["archive"]], [[record["sha256"], record["archive"]]])
         self.assertEqual([entry[1] for entry in sums], sorted(path.name for path in self.assets.iterdir() if path.name != "SHA256SUMS"))
+
+    def test_release_command_requires_an_input(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            self.assertEqual(main(["tools/release.py", str(self.assets)]), 2)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("Usage: python3 -I tools/release.py ASSET_DIR PROVENANCE...", stderr.getvalue())
+        self.assertEqual(list(self.assets.iterdir()), [])
+
+    def test_release_command_writes_the_outputs_and_reports_provenance_digest(self):
+        for combined in (False, True):
+            with self.subTest(combined=combined), tempfile.TemporaryDirectory(dir=self.assets.parent) as scratch:
+                root = Path(scratch)
+                assets = root / "assets"
+                assets.mkdir()
+                parts = [part(assets, target) for target in TARGETS]
+                if combined:
+                    for record in parts[1:]:
+                        parts[0]["targets"].update(record["targets"])
+                        parts[0]["inputs"].update(record["inputs"])
+                    parts = parts[:1]
+                inputs = []
+                for index, record in enumerate(parts):
+                    path = root / f"part-{index}.json"
+                    path.write_text(json.dumps(record))
+                    inputs.append(str(path))
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    self.assertEqual(main(["tools/release.py", str(assets), *inputs]), 0)
+                self.assertEqual(stderr.getvalue(), "")
+                provenance = assets / "provenance.json"
+                payload = provenance.read_bytes()
+                digest = hashlib.sha256(payload).hexdigest()
+                self.assertEqual(stdout.getvalue(), f"ok: release provenance {digest}\n")
+                self.assertEqual(set(json.loads(payload)["targets"]), set(TARGETS))
+                self.assertIn(f"{digest}  provenance.json", (assets / "SHA256SUMS").read_text())
+
+    def test_provenance_mapping_rejects_non_object_or_non_string_key(self):
+        for value in ([], {1: "value"}):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "^expected JSON object$"):
+                object_mapping(value)
+
+    def test_rejects_incorrect_target_record_field_types(self):
+        target = TARGETS[0]
+        for field, value in (("target", 1), ("profile", None), ("archive", 1), ("sha256", 1), ("bytes", True)):
+            with self.subTest(field=field):
+                release_part = part(self.assets, target)
+                original = release_part["targets"][target]
+                malformed = release_part | {"targets": {target: original | {field: value}}}
+                with self.assertRaisesRegex(ValueError, f"^invalid target record {target}$"):
+                    merge(self.assets, [malformed])
 
     def test_preserves_opaque_input_metadata_and_serialized_shape(self):
         parts = [part(self.assets, target) for target in TARGETS]
