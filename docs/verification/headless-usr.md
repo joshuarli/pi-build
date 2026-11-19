@@ -16,6 +16,12 @@ On macOS ARM64, the reduced archive removes 39.6% of compressed bytes and 48.8% 
 
 These are artifact measurements. Startup latency, extraction time, build-time impact, and resident memory were not measured.
 
+`make sizes PROFILE=<profile>` reports manifest values for archives already in
+`dist/<profile>`. It does not validate the archives or compare a budget, and
+prints nothing when no archives match. Run `make verify` separately to check
+artifact identity and behavior. This repository has no performance benchmark
+or workload; the missing comparisons are tracked in `TODO-DESLOP.md`.
+
 ## Packaging policy
 
 The full profile keeps the original runtime packages. The reduced profile applies these changes after the locked install:
