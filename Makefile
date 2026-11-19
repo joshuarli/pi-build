@@ -39,10 +39,10 @@ repro: build
 	cmp "$(ARTIFACT)" "$(REPRO)"
 
 sizes:
-	$(PYTHON) -I tools/sizes.py "$(PROFILE)"
+	uv run --locked $(PYTHON) -I tools/sizes.py "$(PROFILE)"
 
 size-diff:
-	$(PYTHON) -I tools/sizes.py "$(PROFILE)" "$(REFERENCE)" --threshold "$(SIZE_THRESHOLD)"
+	uv run --locked $(PYTHON) -I tools/sizes.py "$(PROFILE)" "$(REFERENCE)" --threshold "$(SIZE_THRESHOLD)"
 
 test:
 	mkdir -p .work/tmp
