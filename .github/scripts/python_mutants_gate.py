@@ -21,7 +21,7 @@ TESTS = {
     "intercom": ("tests/intercom_overlay_test.py",),
     "pack": (PACKAGE_TEST,),
     "release": ("tests/release_test.py",),
-    "sizes": (PACKAGE_TEST,),
+    "sizes": ("tests/sizes_test.py",),
     "vendor": (VENDOR_TEST, "tests/vendor_update_test.py"),
 }
 SOURCES = {f"tools/{module}.py": module for module in TESTS}
@@ -33,7 +33,7 @@ SHARED = {
     ".github/scripts/python_mutation_receipts.json",
 }
 CLIS = {
-    PACKAGE_TEST: tuple((f'TOOLS / "{name}.py"', f'ROOT / "cli-proof/{name}.py"') for name in ("fetch", "pack", "sizes")),
+    PACKAGE_TEST: tuple((f'TOOLS / "{name}.py"', f'ROOT / "cli-proof/{name}.py"') for name in ("fetch", "pack")),
     VENDOR_TEST: (('ROOT / "tools/vendor.py", "--help"', 'ROOT / "cli-proof/vendor.py", "--help"'),),
 }
 BUILD_TOOLS = {
@@ -76,7 +76,7 @@ def seal(directory: Path, module: str) -> None:
         shutil.copyfile(ROOT / path, destination)
     cli_sources = ()
     if PACKAGE_TEST in TESTS[module]:
-        cli_sources = ("fetch", "pack", "sizes")
+        cli_sources = ("fetch", "pack")
     elif VENDOR_TEST in TESTS[module]:
         cli_sources = ("vendor",)
     for name in cli_sources:
