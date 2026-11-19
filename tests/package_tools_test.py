@@ -6,14 +6,14 @@ import sys
 import tarfile
 import tempfile
 import unittest
-from contextlib import chdir, redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 sys.path.insert(0, str(ROOT))
-from tools import fetch, pack, sizes
+from tools import fetch, pack
 
 
 class PackageToolsTests(unittest.TestCase):
@@ -131,43 +131,3 @@ class PackageToolsTests(unittest.TestCase):
                 stream = archive.extractfile("pkg/file.js")
                 assert stream is not None
                 self.assertEqual(stream.read(), payload)
-
-    def test_sizes_lists_only_the_selected_profile_with_payload_totals(self):
-        with tempfile.TemporaryDirectory(dir=".work/tmp") as directory:
-            root = Path(directory)
-            fixtures = (
-                ("full", "z", "aarch64-apple-darwin", 52, {"pi": 9}),
-                ("full", "a", "x86_64-unknown-linux-musl", 300, {"pi": 11, "runtime": 23}),
-                ("headless-usr", "b", "aarch64-apple-darwin", 100, {"pi": 80}),
-            )
-            for profile, name, target, compressed, packages in fixtures:
-                destination = root / "dist" / profile
-                destination.mkdir(parents=True, exist_ok=True)
-                (destination / f"{name}.tar.xz").touch()
-                (destination / f"{name}.manifest.json").write_text(
-                    json.dumps({"target": target, "bytes": compressed, "packages": packages}),
-                    encoding="utf-8",
-                )
-            result = subprocess.run(
-                [sys.executable, "-I", TOOLS / "sizes.py", "full"],
-                cwd=root,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.stderr, "")
-            self.assertEqual(
-                result.stdout.splitlines(),
-                [
-                    "x86_64-unknown-linux-musl compressed=300 payload=34",
-                    "aarch64-apple-darwin compressed=52 payload=9",
-                ],
-            )
-
-            with (
-                chdir(root),
-                patch.object(sys, "argv", ["sizes.py", "headless-usr"]),
-                redirect_stdout(io.StringIO()) as direct,
-            ):
-                sizes.main()
-            self.assertEqual(direct.getvalue(), "aarch64-apple-darwin compressed=100 payload=80\n")

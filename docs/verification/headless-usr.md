@@ -4,7 +4,7 @@ These results cover the `headless-usr` packaging changes for Pi 1.5.0, checked o
 
 ## Artifact size
 
-The comparison uses the same target lockfiles, source snapshots, pinned tools, and archive compression settings for both profiles. Logical bytes count regular file contents, rather than allocated disk blocks. `make sizes` reads the archive manifests. Each profile was built twice per target and compared byte for byte.
+The comparison uses the same target lockfiles, source snapshots, pinned tools, and archive compression settings for both profiles. Logical bytes count regular file contents, rather than allocated disk blocks. `make sizes` verifies the archives against their manifests. Each profile was built twice per target and compared byte for byte.
 
 | Target | Full archive bytes | Headless archive bytes | Full logical bytes | Headless logical bytes |
 | --- | ---: | ---: | ---: | ---: |
@@ -16,11 +16,14 @@ On macOS ARM64, the reduced archive removes 39.6% of compressed bytes and 48.8% 
 
 These are artifact measurements. Startup latency, extraction time, build-time impact, and resident memory were not measured.
 
-`make sizes PROFILE=<profile>` reports manifest values for archives already in
-`dist/<profile>`. It does not validate the archives or compare a budget, and
-prints nothing when no archives match. Run `make verify` separately to check
-artifact identity and behavior. This repository has no performance benchmark
-or workload; the missing comparisons are tracked in `TODO-DESLOP.md`.
+`make sizes PROFILE=<profile>` verifies and reports archives in `dist/<profile>`.
+`make size-diff PROFILE=<profile> REFERENCE=<dir>` compares them with verified
+archives in the reference directory, paired by target. It reports compressed and
+logical package bytes and growing packages. It fails on missing pairs or growth
+above 5% in either total; set `SIZE_THRESHOLD=<percent>` to override that
+comparison threshold. Use a reviewed reference built with comparable inputs.
+Run `make verify` separately for packaged runtime behavior. Build and runtime
+performance comparisons remain tracked in `TODO-DESLOP.md`.
 
 ## Packaging policy
 

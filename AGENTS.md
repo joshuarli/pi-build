@@ -14,5 +14,5 @@
 - `make verify` exercises an existing archive, packaged CLI and help, extensions, providers, and companions. `make repro` rebuilds and compares artifacts. See [intercom verification](docs/verification/intercom-tailnet.md) for the two-host procedure.
 - `make test-companions` uses local tar files to check companion package identity and inventory without building Pi. The regular test workflow runs it alongside the Python suite.
 - The campaign scope covers build and release tooling. It has no identified runtime workload for a performance gate.
-- `make sizes PROFILE=<profile>` reports existing artifact manifest sizes; it does not verify them or detect regressions. There is no performance benchmark entrypoint.
+- `make sizes PROFILE=<profile>` verifies and reports artifacts; `make size-diff PROFILE=<profile> REFERENCE=<dir>` compares verified target pairs, with `SIZE_THRESHOLD` overriding the default 5% growth threshold. There is no performance benchmark entrypoint.
 - `sources/upstreams.json` lists each bundled tree's repository and revision. `sources.lock.json` records toolchain URLs and digests.

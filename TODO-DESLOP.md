@@ -5,6 +5,11 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
+DSLP-11 adds verified artifact size comparisons against a reference directory,
+with target pairing, package growth attribution, and an adjustable threshold.
+Fixture archives exercise integrity, identity, missing pairs, and size changes.
+
+
 Bench audit at `235d3be0`: no benchmark or performance workload exists, so
 there is no bench entrypoint. `make sizes` reads compressed and package
 logical byte counts from manifests for existing archives. It neither validates
@@ -664,13 +669,3 @@ The enrolled-host Intercom procedure remains an owner ticket.
 - **Recommendation:** Define representative build, extraction and packaged startup journeys with correctness checks, capture resource use, and compare repeated baseline and candidate runs on a gated host. Start attribution with process-tree CPU sampling and peak memory measurement.
 - **Fix with:** bench-pyramid
 - **Effort:** L
-
-
-### DSLP-11 · P2 · Detect artifact size regressions
-
-- **Area:** Artifact size
-- **Where:** tools/sizes.py; docs/verification/headless-usr.md; Makefile sizes
-- **Problem:** Unproven: make sizes reports recorded manifest bytes but does not validate the artifact or compare a baseline or budget. A larger download can ship without a regression signal.
-- **Recommendation:** Compare verified archives for matching targets and profiles against a reviewed baseline, report compressed and logical bytes, and identify growing packages. Reject missing or mismatched artifacts before comparing.
-- **Fix with:** bench-pyramid
-- **Effort:** M
