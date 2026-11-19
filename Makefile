@@ -10,11 +10,12 @@ ARTIFACT := dist/$(PROFILE)/$(STEM).tar.xz
 MANIFEST := dist/$(PROFILE)/$(STEM).manifest.json
 REPRO := .work/repro/$(TARGET)/$(STEM).tar.xz
 VERIFY_ROOT := .work/verify/$(TARGET)/$(PROFILE)
+SIZE_THRESHOLD ?= 5
 BASE ?= origin/main
 MUTATION_ENGINE_REV := 1497970d9454a6a9875b1f201cbaad71fd92a010
 MUTATION_ENGINE := .work/mutation-engine/$(MUTATION_ENGINE_REV).py
 
-.PHONY: prepare build verify repro sizes test coverage mutants-diff test-companions test-intercom lint clean
+.PHONY: prepare build verify repro sizes size-diff test coverage mutants-diff test-companions test-intercom lint clean
 prepare:
 	PREPARE_LOCKS=1 $(NODE) --version
 	PREPARE_LOCKS=1 PYTHON="$(PYTHON)" bash tools/build.sh "$(TARGET)" "$(PROFILE)" "$(BUILD)" "$(ARTIFACT)" "$(VERSION)"
@@ -38,7 +39,10 @@ repro: build
 	cmp "$(ARTIFACT)" "$(REPRO)"
 
 sizes:
-	$(PYTHON) -I tools/sizes.py "$(PROFILE)"
+	uv run --locked $(PYTHON) -I tools/sizes.py "$(PROFILE)"
+
+size-diff:
+	uv run --locked $(PYTHON) -I tools/sizes.py "$(PROFILE)" "$(REFERENCE)" --threshold "$(SIZE_THRESHOLD)"
 
 test:
 	mkdir -p .work/tmp
