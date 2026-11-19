@@ -1,9 +1,28 @@
 Prefix: DSLP
-Next: 10
+Next: 12
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
 ## Report
+
+Bench audit at `235d3be0`: no benchmark or performance workload exists, so
+there is no bench entrypoint. `make sizes` reads compressed and package
+logical byte counts from manifests for existing archives. It neither validates
+them nor fails when no archives exist. The recorded profile comparisons use
+real builds and repeat-build checks, but have no size budget or regression
+gate. Package totals offer a first attribution path; they do not account for
+compression by package. The historical paired test-command timings measure
+suite cost, not build or product performance.
+
+Ranked gaps: (1) DSLP-10: build time, extraction time, startup latency and
+runtime memory have no representative performance evidence or attribution.
+(2) DSLP-11: artifact size has historical evidence but no verified baseline
+comparison or gate. Both are P2 because user-visible regressions can ship
+unseen. CPU sampling across the process tree and peak memory measurement are
+starting points for attribution; instrumented runs must be separate from
+timed comparisons. No sample policy, host gate or performance budget exists
+for these outcomes. `make verify` checks artifact identity and behavior, not
+performance. No build or two-host Intercom run was needed for this audit.
 
 Ground (DSLP-1) passed at base `442f463954a6ead8fb9223f8c148bcc4c1bc66cf`. [Verification](AGENTS.md#verification) records the elapsed costs, test boundaries, and artifact checks. The sealed run covered 11 tests. Release artifacts, live providers, and the two-host intercom remain separate checks.
 
@@ -636,3 +655,23 @@ The enrolled-host Intercom procedure remains an owner ticket.
 - **Recommendation:** Use the documented disposable enrollments on two available tailnet hosts. Run bidirectional delivery through the named harnesses, identity recovery, fleet isolation, revocation and worker isolation. Record the checked builder revision and each host and harness pair.
 - **Fix with:** none
 - **Effort:** M
+
+### DSLP-10 · P2 · Measure build and runtime wait times
+
+- **Area:** Build and runtime performance
+- **Where:** Makefile build and verify targets; docs/verification/headless-usr.md
+- **Problem:** Unproven: build duration, extraction time, startup latency and runtime memory have no representative performance workload or regression comparison. A user-visible slowdown can ship while correctness checks pass.
+- **Recommendation:** Define representative build, extraction and packaged startup journeys with correctness checks, capture resource use, and compare repeated baseline and candidate runs on a gated host. Start attribution with process-tree CPU sampling and peak memory measurement.
+- **Fix with:** bench-pyramid
+- **Effort:** L
+
+
+### DSLP-11 · P2 · Detect artifact size regressions
+
+- **Area:** Artifact size
+- **Where:** tools/sizes.py; docs/verification/headless-usr.md; Makefile sizes
+- **Problem:** Unproven: make sizes reports recorded manifest bytes but does not validate the artifact or compare a baseline or budget. A larger download can ship without a regression signal.
+- **Recommendation:** Compare verified archives for matching targets and profiles against a reviewed baseline, report compressed and logical bytes, and identify growing packages. Reject missing or mismatched artifacts before comparing.
+- **Fix with:** bench-pyramid
+- **Effort:** M
+
