@@ -674,4 +674,3 @@ The enrolled-host Intercom procedure remains an owner ticket.
 - **Recommendation:** Compare verified archives for matching targets and profiles against a reviewed baseline, report compressed and logical bytes, and identify growing packages. Reject missing or mismatched artifacts before comparing.
 - **Fix with:** bench-pyramid
 - **Effort:** M
-
