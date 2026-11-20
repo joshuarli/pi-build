@@ -1,11 +1,29 @@
 Prefix: PIB
-Next: 7
+Next: 9
 
 # TODO
 
 PIB-1 through PIB-4 are implemented and verified. The reduced profile is published as an opt-in release and pinned by `usr`; the committed full pin remains the default. See [headless runtime verification](docs/verification/headless-usr.md) for measurements, checks, and remaining limits.
 
 Headless does not mean text-only. Preserve docs, examples, licenses, images, extension loading, detached children, and OpenCode Go's Anthropic, Google, and OpenAI protocols. Any further provider restriction needs an explicit supported-model decision.
+
+### PIB-7 · P2 · Verify Intercom across two enrolled hosts
+
+- **Area:** Needs owner · Intercom environment
+- **Where:** docs/verification/intercom-tailnet.md, Actual tailnet and harness acceptance
+- **Problem:** Local real sockets, offline provider fixtures and native artifact checks have passed. No result records two separately enrolled tailnet hosts with the actual coordinator harnesses, so cross-host delivery and credential recovery are still unproven.
+- **Recommendation:** Use the documented disposable enrollments on two available tailnet hosts. Run bidirectional delivery through the named harnesses, identity recovery, fleet isolation, revocation and worker isolation. Record the checked builder revision and each host and harness pair.
+- **Fix with:** none
+- **Effort:** M
+
+### PIB-8 · P3 · Measure build and runtime wait times
+
+- **Area:** Build and runtime performance
+- **Where:** Makefile build and verify targets; docs/verification/headless-usr.md
+- **Problem:** Unproven: build duration, extraction time, startup latency and runtime memory have no representative performance workload or regression comparison. A user-visible slowdown can ship while correctness checks pass.
+- **Recommendation:** Define representative build, extraction and packaged startup journeys with correctness checks, capture resource use, and compare repeated baseline and candidate runs on a gated host. Start attribution with process-tree CPU sampling and peak memory measurement.
+- **Fix with:** bench-pyramid
+- **Effort:** L
 
 ### PIB-5 · P4 · Archives carry native prebuilds for other platforms
 

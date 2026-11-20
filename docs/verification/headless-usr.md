@@ -23,7 +23,7 @@ logical package bytes and growing packages. It fails on missing pairs or growth
 above 5% in either total; set `SIZE_THRESHOLD=<percent>` to override that
 comparison threshold. Use a reviewed reference built with comparable inputs.
 Run `make verify` separately for packaged runtime behavior. Build and runtime
-performance comparisons remain tracked in `TODO-DESLOP.md`.
+performance comparisons remain tracked in `TODO.md` (PIB-8).
 
 ## Packaging policy
 
