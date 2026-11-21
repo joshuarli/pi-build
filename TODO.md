@@ -1,5 +1,5 @@
 Prefix: PIB
-Next: 9
+Next: 10
 
 # TODO
 
@@ -13,6 +13,15 @@ Headless does not mean text-only. Preserve docs, examples, licenses, images, ext
 - **Where:** docs/verification/intercom-tailnet.md, Actual tailnet and harness acceptance
 - **Problem:** Local real sockets, offline provider fixtures and native artifact checks have passed. No result records two separately enrolled tailnet hosts with the actual coordinator harnesses, so cross-host delivery and credential recovery are still unproven.
 - **Recommendation:** Use the documented disposable enrollments on two available tailnet hosts. Run bidirectional delivery through the named harnesses, identity recovery, fleet isolation, revocation and worker isolation. Record the checked builder revision and each host and harness pair.
+- **Fix with:** none
+- **Effort:** M
+
+### PIB-9 · P2 · A running coordinator cannot be reached from another host without relaunching it
+
+- **Area:** Intercom
+- **Where:** agent-intercom-claude claude-server (spawnBrokerIfNeeded, lazy getClient reconnect); broker/tailnet-admin.ts; usr intercom-tailnet run; docs/verification/intercom-tailnet.md
+- **Problem:** On 2026-11-21 a Claude coordinator on the Mac needed to message a long-running Claude session on threadripper (started 15 h earlier as plain `claude` in tmux). There was no path: (1) the tailnet hub on threadripper (tcp://100.98.145.91:47831) admits only coordinators launched through `intercom-tailnet run --endpoint ... --credential ... -- claude`; `intercom-tailnet inspect` listed only `mac/main`, not connected, and neither live session was enrolled, so both would have to be restarted, losing their context. (2) threadripper's machine broker (~/.pi/agent/intercom/broker.sock) was not running; the session's claude-server.mjs (alive for 16 h) only reconnects lazily on its own next intercom tool call, so a one-shot MCP client on the same host saw `No intercom sessions connected.` (3) Separately, `node .../agent-intercom-claude/dist/cci.mjs --help` started an intercom worker (`claude-josh-worktree-...`) and wrote claude-worker-mcp-*.json instead of printing help.
+- **Recommendation:** Let an already-running coordinator join a fleet without a restart, for example an MCP tool or command that loads an enrollment credential into the live claude-server and switches it to the remote endpoint, preserving the no-local-fallback rule. Keep a registered presence while the session is idle (eager connect or a heartbeat) so peers can discover it, with inboundTrigger still never by default. Make cci --help print usage without side effects. Acceptance: from the Mac, a coordinator discovers and delivers a message to a Claude session on threadripper that was started before enrollment, without restarting it; `cci --help` exits 0 printing help and creates no files or processes.
 - **Fix with:** none
 - **Effort:** M
 
