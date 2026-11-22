@@ -80,6 +80,9 @@ lint:
 	uv run --locked ty check tools tests .github/scripts/python_mutants_gate.py
 
 clean:
-	rm -rf dist .work .venv .pytest_cache .ruff_cache
-	find . -name __pycache__ -type d -prune -exec rm -rf {} +
-	find . -name node_modules -type d -prune -exec rm -rf {} +
+	@for artifact in ./dist ./.pytest_cache ./.ruff_cache; do \
+	  if test -L "$$artifact" || { test -e "$$artifact" && ! test -d "$$artifact"; }; then \
+	    printf '%s\n' "make clean: $$artifact must be a local build directory" >&2; exit 1; \
+	  fi; \
+	done
+	rm -rf -- ./dist ./.pytest_cache ./.ruff_cache

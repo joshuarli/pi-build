@@ -2,6 +2,7 @@
 
 ## Verification
 
+- `make clean` removes the local release output and root pytest and Ruff caches. It preserves `.work` and installed dependencies.
 - On macOS ARM64 with Python 3.15.2, `make test` passes 74 tests; `make coverage` runs the same tests with branch coverage and writes `.work/tmp/coverage/coverage.json`.
 - On the same host, `make lint` runs Ruff and ty on `tools/` and `tests/` in 0.60 s after test setup and 0.08 s warm. Pull requests run both Make targets through the CI and lint workflows.
 - `tests/archive_test.py` exercises archive contents, reproducibility, manifest identity, and path validation for the extracted runtime and `make verify`.
