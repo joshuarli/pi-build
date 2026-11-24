@@ -1,5 +1,7 @@
 # Pi-build
 
+The roadmap, [docs/roadmap.md](docs/roadmap.md), holds all current and future work; its Status is the resume point.
+
 ## Verification
 
 - `make clean` removes the local release output and root pytest and Ruff caches. It preserves `.work` and installed dependencies.
