@@ -14,8 +14,7 @@ dest=$root/.work/toolchain/$target
 [ "$mode" = musl ] && dest=$dest-check
 
 digest() {
-    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
-    else shasum -a 256 "$1" | cut -d' ' -f1; fi
+    sha256sum "$1" | cut -d' ' -f1
 }
 
 fetch() {

@@ -182,20 +182,20 @@ for name in names:
 print(json.dumps(result, sort_keys=True, separators=(",", ":")))
 ' "$root" "$profile")
 provenance=$root/dist/$profile/provenance.json
-source_digest=$(shasum -a 256 "$root/sources/upstreams.json" | awk '{print $1}')
-patch_digest=$(shasum -a 256 "$root/patches/muse-offline-catalog.patch" | awk '{print $1}')
-trust_patch_digest=$(shasum -a 256 "$root/patches/muse-host-trust.patch" | awk '{print $1}')
-lock_digest=$(shasum -a 256 "$lockdir/package-lock.json" | awk '{print $1}')
+source_digest=$(sha256sum "$root/sources/upstreams.json" | awk '{print $1}')
+patch_digest=$(sha256sum "$root/patches/muse-offline-catalog.patch" | awk '{print $1}')
+trust_patch_digest=$(sha256sum "$root/patches/muse-host-trust.patch" | awk '{print $1}')
+lock_digest=$(sha256sum "$lockdir/package-lock.json" | awk '{print $1}')
 intercom_patch_digest=$("$PYTHON" -I "$root/tools/intercom.py" digest)
-drop_windows_patch_digest=$(shasum -a 256 "$root/patches/drop-windows.patch" | awk '{print $1}')
-builder_tools_digest=$(cat "$root/tools/build.sh" "$root/tools/pack.py" "$root/tools/archive.py" "$root/tools/headless.mjs" "$root/tools/compile-devin.mjs" "$root/tools/intercom.py" | shasum -a 256 | awk '{print $1}')
+drop_windows_patch_digest=$(sha256sum "$root/patches/drop-windows.patch" | awk '{print $1}')
+builder_tools_digest=$(cat "$root/tools/build.sh" "$root/tools/pack.py" "$root/tools/archive.py" "$root/tools/headless.mjs" "$root/tools/compile-devin.mjs" "$root/tools/intercom.py" | sha256sum | awk '{print $1}')
 node_version=$(node --version)
 npm_version=$(npm --version)
 python_version=$("$PYTHON" --version)
 jaq_version=$(jaq --version)
 zlib_version=$("$PYTHON" -c 'import zlib; print(zlib.ZLIB_VERSION)')
-core_lock_digest=$(shasum -a 256 "$root/locks/core-build/package-lock.json" | awk '{print $1}')
-archive_sha=$(shasum -a 256 "$output" | awk '{print $1}')
+core_lock_digest=$(sha256sum "$root/locks/core-build/package-lock.json" | awk '{print $1}')
+archive_sha=$(sha256sum "$output" | awk '{print $1}')
 archive_bytes=$(wc -c < "$output" | tr -d ' ')
 if [[ -f "$provenance" ]] && ! jaq -e --arg revision "$revision" --arg profile "$profile" --arg version "$version" --arg source "$source_digest" '.builder_revision == $revision and .profile == $profile and .version == $version and .sources_sha256 == $source' "$provenance" >/dev/null; then
     "$PYTHON" -c 'from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True)' "$provenance"
@@ -211,5 +211,5 @@ jaq --arg revision "$revision" --arg product "$product" --arg version "$version"
 mv "$tmp" "$provenance"
 (cd "$(dirname "$output")" && : > SHA256SUMS && for artifact in *.tar.xz *.tgz; do
     [[ -f "$artifact" ]] || continue
-    shasum -a 256 "$artifact" >> SHA256SUMS
+    sha256sum "$artifact" >> SHA256SUMS
 done)
