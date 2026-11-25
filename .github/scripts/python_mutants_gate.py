@@ -30,7 +30,7 @@ SHARED = {
     "bootstrap.lock.json", "sources.lock.json", ".github/workflows/ci.yml",
     ".github/workflows/lint.yml", ".github/workflows/prepare-locks.yml", ".github/workflows/release.yml",
     ".github/workflows/python-mutation.yml", ".github/scripts/python_mutants_gate.py",
-    ".github/scripts/python_mutation_receipts.json",
+    ".github/scripts/python_mutation_receipts.json", ".github/tools.lock.json",
 }
 CLIS = {
     PACKAGE_TEST: tuple((f'TOOLS / "{name}.py"', f'ROOT / "cli-proof/{name}.py"') for name in ("fetch", "pack")),
